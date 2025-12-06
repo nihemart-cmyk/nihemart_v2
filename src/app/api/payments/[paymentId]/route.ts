@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceSupabaseClient } from "@/utils/supabase/service";
 import { logger } from "@/lib/logger";
-import { initializeKPayService } from "@/lib/services/kpay";
+import { API_BASE } from "@/lib/api";
+
+// Helper to extract auth token from request
+function getAuthToken(request: NextRequest): string | null {
+   const authHeader = request.headers.get("authorization");
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+   }
+   return null;
+}
 
 interface RouteParams {
    params: Promise<{
@@ -22,65 +30,63 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
          );
       }
 
-      // Initialize Supabase client
-      const supabase = createServiceSupabaseClient();
+      // Get auth token from request headers
+      const authToken = getAuthToken(request);
 
-      // Fetch payment details - use maybeSingle to avoid coercion errors
-      const { data: payment, error: paymentError } = await supabase
-         .from("payments")
-         .select("*")
-         .eq("id", paymentId)
-         .maybeSingle();
+      // Forward request to backend
+      const backendUrl = `${API_BASE}/payments/${paymentId}`;
+      const backendResponse = await fetch(backendUrl, {
+         method: "GET",
+         headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+         },
+      });
 
-      if (paymentError || !payment) {
-         // If not found by id, try to find by reference in payments (sometimes reference used as id)
-         logger.info(
-            "api",
-            "Payment not found in payments table by id, trying fallback lookups",
-            { paymentId, error: paymentError?.message }
-         );
+      const backendData = await backendResponse.json();
 
-         try {
-            const { data: byRef, error: byRefErr } = await supabase
-               .from("payments")
-               .select("*")
-               .eq("reference", paymentId)
-               .maybeSingle();
-
-            if (byRefErr) {
-               logger.warn("api", "Failed payments fallback lookup", {
-                  paymentId,
-                  error: byRefErr.message,
-               });
-            }
-
-            if (byRef) {
-               // use byRef as payment
-               return NextResponse.json(byRef);
-            }
-         } catch (e) {
-            logger.error("api", "Error during payments fallback lookup", {
-               paymentId,
-               error: e instanceof Error ? e.message : String(e),
-            });
-         }
-
-         logger.warn("api", "Payment not found", { paymentId });
+      if (!backendResponse.ok) {
+         logger.error("api", "Backend payment fetch failed", {
+            paymentId,
+            status: backendResponse.status,
+            error: backendData.message || backendData.error,
+         });
          return NextResponse.json(
-            { error: "Payment not found" },
-            { status: 404 }
+            {
+               error: backendData.message || backendData.error || "Payment not found",
+            },
+            { status: backendResponse.status }
          );
       }
 
+      // Transform backend response (camelCase to snake_case for compatibility)
+      const payment = backendData.data || backendData;
+      const transformed = {
+         ...payment,
+         order_id: payment.orderId || payment.order_id,
+         kpay_transaction_id: payment.kpayTransactionId || payment.kpay_transaction_id,
+         kpay_auth_key: payment.kpayAuthKey || payment.kpay_auth_key,
+         kpay_return_code: payment.kpayReturnCode || payment.kpay_return_code,
+         kpay_response: payment.kpayResponse || payment.kpay_response,
+         kpay_webhook_data: payment.kpayWebhookData || payment.kpay_webhook_data,
+         kpay_mom_transaction_id: payment.kpayMomTransactionId || payment.kpay_mom_transaction_id,
+         kpay_pay_account: payment.kpayPayAccount || payment.kpay_pay_account,
+         failure_reason: payment.failureReason || payment.failure_reason,
+         client_timeout: payment.clientTimeout || payment.client_timeout,
+         client_timeout_reason: payment.clientTimeoutReason || payment.client_timeout_reason,
+         created_at: payment.createdAt || payment.created_at,
+         updated_at: payment.updatedAt || payment.updated_at,
+         completed_at: payment.completedAt || payment.completed_at,
+      };
+
       logger.info("api", "Payment details retrieved successfully", {
          paymentId,
-         orderId: payment.order_id,
-         status: payment.status,
-         amount: payment.amount,
+         orderId: transformed.order_id,
+         status: transformed.status,
+         amount: transformed.amount,
       });
 
-      // Return payment as-is; clients control status checks to avoid excessive server load
-      return NextResponse.json(payment);
+      return NextResponse.json(transformed);
    } catch (error) {
       logger.error("api", "Failed to retrieve payment details", {
          paymentId,
@@ -97,7 +103,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 /**
  * PATCH /api/payments/[paymentId]
- * Links a payment to an order after order creation
+ * Note: In one-way flow, payments are always created with orderId, so linking is not needed.
+ * This endpoint is kept for backward compatibility but may not be used.
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
    try {
@@ -112,176 +119,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
          );
       }
 
-      logger.info("api", "Linking payment to order", {
+      logger.warn("api", "PATCH payment endpoint called - not needed in one-way flow", {
          paymentId,
          orderId: order_id,
       });
 
-      const supabase = createServiceSupabaseClient();
-
-      // Get payment from payments table (by id or reference)
-      let payment: any = null;
-      try {
-         const { data: p, error: pErr } = await supabase
-            .from("payments")
-            .select("id, status, order_id, reference, kpay_transaction_id")
-            .or(`id.eq.${paymentId},reference.eq.${paymentId}`)
-            .maybeSingle();
-
-         if (p && !pErr) payment = p;
-      } catch (e) {
-         logger.error("api", "Error fetching payment", { paymentId, error: e });
-      }
-
-      if (!payment) {
-         logger.error("api", "Payment not found in payments table", {
-            paymentId,
-         });
-         return NextResponse.json(
-            { error: "Payment not found" },
-            { status: 404 }
-         );
-      }
-
-      // Check if payment is already linked
-      if (payment.order_id && payment.order_id !== order_id) {
-         logger.warn("api", "Payment already linked to different order", {
-            paymentId,
-            existingOrderId: payment.order_id,
-            newOrderId: order_id,
-         });
-         return NextResponse.json(
-            { error: "Payment already linked to a different order" },
-            { status: 409 }
-         );
-      }
-
-      // If payment is not completed yet, attempt reconciliation with KPay
-      if (payment.status !== "completed" && payment.status !== "successful") {
-         try {
-            const kpayService = initializeKPayService();
-            const kpayResp = await kpayService.checkPaymentStatus({
-               transactionId: payment.kpay_transaction_id || undefined,
-               orderReference: payment.reference || undefined,
-            });
-
-            const statusIdStr = String(kpayResp?.statusid || "").padStart(
-               2,
-               "0"
-            );
-
-            if (statusIdStr === "01") {
-               // Persist KPay completion info
-               const updateData: any = {
-                  status: "completed",
-                  completed_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  kpay_response: kpayResp,
-                  kpay_return_code: kpayResp.retcode,
-               };
-               if (kpayResp.tid) updateData.kpay_transaction_id = kpayResp.tid;
-               if (kpayResp.momtransactionid)
-                  updateData.kpay_mom_transaction_id =
-                     kpayResp.momtransactionid;
-
-               const { error: reconcileErr } = await supabase
-                  .from("payments")
-                  .update(updateData)
-                  .eq("id", payment.id);
-
-               if (!reconcileErr) {
-                  payment.status = "completed";
-               }
-            } else {
-               return NextResponse.json(
-                  { error: "Payment not completed at gateway" },
-                  { status: 409 }
-               );
-            }
-         } catch (e) {
-            logger.warn("api", "KPay reconciliation failed during PATCH link", {
-               error: e,
-            });
-            return NextResponse.json(
-               { error: "Unable to verify payment status with gateway" },
-               { status: 503 }
-            );
-         }
-      }
-
-      // Verify order exists
-      const { data: order, error: orderError } = await supabase
-         .from("orders")
-         .select("id, status")
-         .eq("id", order_id)
-         .single();
-
-      if (orderError || !order) {
-         logger.error("api", "Order not found", {
-            orderId: order_id,
-            error: orderError?.message,
-         });
-         return NextResponse.json(
-            { error: "Order not found" },
-            { status: 404 }
-         );
-      }
-
-      // Link payment to order and update order status
-      const linkedPaymentId = payment?.id || paymentId;
-      const { error: updateError } = await supabase
-         .from("payments")
-         .update({
-            order_id: order_id,
-            updated_at: new Date().toISOString(),
-         })
-         .eq("id", linkedPaymentId);
-
-      if (updateError) {
-         logger.error("api", "Failed to link payment to order", {
-            paymentId,
-            orderId: order_id,
-            error: updateError.message,
-            code: updateError.code,
-            details: updateError.details,
-         });
-         return NextResponse.json(
-            { error: "Failed to link payment to order" },
-            { status: 500 }
-         );
-      }
-
-      // Update order's payment_status to 'paid' since payment was completed
-      const { error: orderUpdateError } = await supabase
-         .from("orders")
-         .update({
-            payment_status: "paid",
-            is_paid: true,
-            updated_at: new Date().toISOString(),
-         })
-         .eq("id", order_id);
-
-      if (orderUpdateError) {
-         logger.warn("api", "Failed to update order payment_status", {
-            orderId: order_id,
-            error: orderUpdateError.message,
-         });
-         // Don't fail the request since payment link succeeded
-      } else {
-         logger.info("api", "Order payment_status updated to paid", {
-            orderId: order_id,
-         });
-      }
-
-      logger.info("api", "Payment successfully linked to order", {
-         paymentId,
-         orderId: order_id,
-      });
-
+      // In one-way flow, payments are created with orderId, so linking is not needed
+      // Return success for backward compatibility
       return NextResponse.json({
          success: true,
-         message: "Payment linked to order successfully",
-         paymentId: linkedPaymentId,
+         message: "Payment already linked to order (one-way flow)",
+         paymentId,
          orderId: order_id,
       });
    } catch (error) {

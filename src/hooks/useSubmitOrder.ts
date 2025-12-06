@@ -494,53 +494,43 @@ export default function useSubmitOrder(args: any) {
                return;
             }
 
-            // Initiate session-based or gateway payment if not COD
+            // ONE-WAY FLOW: Create order FIRST, then initiate payment
             if (
                args.paymentMethod &&
                args.paymentMethod !== "cash_on_delivery"
             ) {
-               try {
-                  console.log(
-                     "[useSubmitOrder] Initiating payment with method:",
-                     args.paymentMethod
-                  );
-                  setPaymentInProgress && setPaymentInProgress(true);
-
-                  const customerPhone =
-                     args.paymentMethod === "mtn_momo" ||
-                     args.paymentMethod === "airtel_money"
-                        ? mobileMoneyPhones[args.paymentMethod] ||
-                          formatPhoneNumber(
-                             args.selectedAddress?.phone || formData.phone || ""
-                          )
-                        : formatPhoneNumber(
-                             args.selectedAddress?.phone || formData.phone || ""
-                          );
-
-                  const derivedFullName =
-                     (user &&
-                        user.user_metadata &&
-                        user.user_metadata.full_name &&
-                        user.user_metadata.full_name.trim()) ||
-                     `${formData.fullName || ""}`.trim();
-
-                  // Ensure we always have customer name (required for guests)
-                  const paymentCustomerName =
-                     derivedFullName || formData.fullName || "Guest Customer";
-
-                  // Email is optional - will use fallback in API if not provided
-                  const paymentCustomerEmail = (formData.email || "").trim();
-
-                  let paymentResult;
-
-                  if (effectiveIsRetry && effectiveRetryOrderId) {
-                     // Use retry API for retry mode
+               // For retry mode, we already have an orderId
+               if (effectiveIsRetry && effectiveRetryOrderId) {
+                  try {
                      console.log(
                         "[useSubmitOrder] Retrying payment for order:",
                         effectiveRetryOrderId,
                         "with method:",
                         args.paymentMethod
                      );
+                     setPaymentInProgress && setPaymentInProgress(true);
+
+                     const customerPhone =
+                        args.paymentMethod === "mtn_momo" ||
+                        args.paymentMethod === "airtel_money"
+                           ? mobileMoneyPhones[args.paymentMethod] ||
+                             formatPhoneNumber(
+                                args.selectedAddress?.phone || formData.phone || ""
+                             )
+                           : formatPhoneNumber(
+                                args.selectedAddress?.phone || formData.phone || ""
+                             );
+
+                     const derivedFullName =
+                        (user &&
+                           user.user_metadata &&
+                           user.user_metadata.full_name &&
+                           user.user_metadata.full_name.trim()) ||
+                        `${formData.fullName || ""}`.trim();
+
+                     const paymentCustomerName =
+                        derivedFullName || formData.fullName || "Guest Customer";
+                     const paymentCustomerEmail = (formData.email || "").trim();
 
                      const retryRequest = {
                         orderId: effectiveRetryOrderId,
@@ -549,13 +539,8 @@ export default function useSubmitOrder(args: any) {
                         customerEmail: paymentCustomerEmail,
                         customerPhone,
                         paymentMethod: args.paymentMethod,
-                        redirectUrl: `${window.location.origin}/checkout?payment=success`,
+                        redirectUrl: `${window.location.origin}/payment/${effectiveRetryOrderId}`,
                      };
-
-                     console.log(
-                        "[useSubmitOrder] Retry request payload:",
-                        retryRequest
-                     );
 
                      const retryResponse = await fetch("/api/payments/retry", {
                         method: "POST",
@@ -569,124 +554,187 @@ export default function useSubmitOrder(args: any) {
 
                      if (!retryResponse.ok) {
                         throw new Error(
-                           retryData.error || "Retry payment failed"
+                           retryData.error || retryData.message || "Retry payment failed"
                         );
                      }
 
-                     paymentResult = {
-                        success: retryData.success,
-                        paymentId: retryData.paymentId,
-                        transactionId: retryData.transactionId,
-                        checkoutUrl: retryData.checkoutUrl,
-                        status: retryData.status,
-                        reference: retryData.reference,
-                     };
-                  } else {
-                     // Use normal initiate API for new payments
-                     const cartSnapshot = orderItems.map((it: any) => ({
-                        product_id: it.product_id || it.id,
-                        name: it.name,
-                        price: it.price,
-                        quantity: it.quantity,
-                        sku: it.sku,
-                        variation_id: it.variation_id,
-                        variation_name: it.variation_name,
-                     }));
-
-                     const paymentRequest: any = {
-                        amount: total,
-                        customerName: paymentCustomerName,
-                        customerEmail: paymentCustomerEmail,
-                        customerPhone,
-                        paymentMethod: args.paymentMethod,
-                        redirectUrl: `${window.location.origin}/checkout?payment=success`,
-                        cart: cartSnapshot,
-                     };
-
-                     console.log("[useSubmitOrder] Payment request:", {
-                        paymentMethod: paymentRequest.paymentMethod,
-                        amount: paymentRequest.amount,
-                        customerName: paymentRequest.customerName,
-                     });
-
-                     const validationErrors = validatePaymentRequest
-                        ? validatePaymentRequest(paymentRequest)
-                        : [];
-                     if (validationErrors.length > 0) {
-                        setPaymentInProgress && setPaymentInProgress(false);
-                        setIsSubmitting && setIsSubmitting(false);
-                        toast.error(
-                           `Payment validation failed: ${validationErrors[0]}`
-                        );
-                        return;
-                     }
-
-                     paymentResult = await initiatePayment(paymentRequest);
-                  }
-
-                  if (paymentResult.success) {
-                     toast.success("Redirecting to payment gateway...");
-
-                     const ref =
-                        paymentResult.reference ||
-                        paymentResult.session?.reference ||
-                        null;
-                     if (ref) {
-                        try {
-                           sessionStorage.setItem(
-                              "kpay_reference",
-                              String(ref)
-                           );
-                        } catch (e) {}
-                     }
-
-                     if (paymentResult.checkoutUrl) {
-                        window.location.href = String(
-                           paymentResult.checkoutUrl
-                        );
-                        return;
-                     }
-
-                     const sessionId =
-                        paymentResult.sessionId ||
-                        paymentResult.paymentId ||
-                        paymentResult.session?.id;
-                     if (sessionId) {
-                        try {
-                           router.push(`/payment/${sessionId}`);
+                     if (retryData.success && retryData.data) {
+                        const checkoutUrl = retryData.data.url || retryData.data.redirecturl || retryData.checkoutUrl;
+                        if (checkoutUrl) {
+                           toast.success("Redirecting to payment gateway...");
+                           window.location.href = checkoutUrl;
                            return;
-                        } catch (e) {
-                           window.location.href = `${window.location.origin}/payment/${sessionId}`;
+                        }
+                        const paymentId = retryData.paymentId || retryData.data?.paymentId;
+                        if (paymentId) {
+                           toast.success("Redirecting to payment page...");
+                           router.push(`/payment/${paymentId}`);
                            return;
                         }
                      }
 
-                     toast.error(
-                        "Payment started but no redirect information was provided. Please check your payments page or contact support."
-                     );
                      setPaymentInProgress && setPaymentInProgress(false);
                      setIsSubmitting && setIsSubmitting(false);
+                     toast.error("Payment retry failed. Please try again.");
                      return;
-                  } else {
+                  } catch (err: any) {
+                     console.error("Payment retry failed:", err);
                      setPaymentInProgress && setPaymentInProgress(false);
                      setIsSubmitting && setIsSubmitting(false);
-                     toast.error(
-                        `Payment initiation failed: ${
-                           paymentResult.error || "Unknown error"
-                        }`
-                     );
+                     toast.error(err?.message || "Failed to retry payment. Please try again.");
                      return;
                   }
-               } catch (err) {
-                  console.error(
-                     "Session-based payment initiation failed:",
-                     err
-                  );
-                  setPaymentInProgress && setPaymentInProgress(false);
-                  setIsSubmitting && setIsSubmitting(false);
-                  toast.error("Failed to start payment. Please try again.");
-                  return;
                }
+
+               // For new payments: Create order FIRST, then initiate payment
+               setSuppressEmptyCartRedirect && setSuppressEmptyCartRedirect(true);
+               setPaymentInProgress && setPaymentInProgress(true);
+               
+               createOrder.mutate(orderData, {
+                  onSuccess: async (createdOrder: any) => {
+                     const created =
+                        createdOrder && createdOrder.order
+                           ? createdOrder.order
+                           : createdOrder;
+                     
+                     try {
+                        const customerPhone =
+                           args.paymentMethod === "mtn_momo" ||
+                           args.paymentMethod === "airtel_money"
+                              ? mobileMoneyPhones[args.paymentMethod] ||
+                                formatPhoneNumber(
+                                   args.selectedAddress?.phone || formData.phone || ""
+                                )
+                              : formatPhoneNumber(
+                                   args.selectedAddress?.phone || formData.phone || ""
+                                );
+
+                        const derivedFullName =
+                           (user &&
+                              user.user_metadata &&
+                              user.user_metadata.full_name &&
+                              user.user_metadata.full_name.trim()) ||
+                           `${formData.fullName || ""}`.trim();
+
+                        const paymentCustomerName =
+                           derivedFullName || formData.fullName || "Guest Customer";
+                        const paymentCustomerEmail = (formData.email || "").trim();
+
+                        const paymentRequest: any = {
+                           orderId: created.id,
+                           amount: total,
+                           customerName: paymentCustomerName,
+                           customerEmail: paymentCustomerEmail,
+                           customerPhone,
+                           paymentMethod: args.paymentMethod,
+                           redirectUrl: `${window.location.origin}/payment/${created.id}`,
+                        };
+
+                        console.log("[useSubmitOrder] Initiating payment for order:", {
+                           orderId: created.id,
+                           paymentMethod: paymentRequest.paymentMethod,
+                           amount: paymentRequest.amount,
+                        });
+
+                        const validationErrors = validatePaymentRequest
+                           ? validatePaymentRequest(paymentRequest)
+                           : [];
+                        if (validationErrors.length > 0) {
+                           setPaymentInProgress && setPaymentInProgress(false);
+                           setIsSubmitting && setIsSubmitting(false);
+                           toast.error(
+                              `Payment validation failed: ${validationErrors[0]}`
+                           );
+                           return;
+                        }
+
+                        const paymentResult = await initiatePayment(paymentRequest);
+
+                        if (paymentResult.success) {
+                           toast.success("Redirecting to payment gateway...");
+
+                           const ref =
+                              paymentResult.reference ||
+                              paymentResult.data?.reference ||
+                              null;
+                           if (ref) {
+                              try {
+                                 sessionStorage.setItem(
+                                    "kpay_reference",
+                                    String(ref)
+                                 );
+                              } catch (e) {}
+                           }
+
+                           const checkoutUrl =
+                              paymentResult.checkoutUrl ||
+                              paymentResult.data?.url ||
+                              paymentResult.data?.redirecturl;
+                           
+                           if (checkoutUrl) {
+                              window.location.href = String(checkoutUrl);
+                              return;
+                           }
+
+                           const paymentId =
+                              paymentResult.paymentId ||
+                              paymentResult.data?.paymentId ||
+                              paymentResult.sessionId;
+                           
+                           if (paymentId) {
+                              try {
+                                 router.push(`/payment/${paymentId}`);
+                                 return;
+                              } catch (e) {
+                                 window.location.href = `${window.location.origin}/payment/${paymentId}`;
+                                 return;
+                              }
+                           }
+
+                           // Fallback: redirect to order page
+                           navigatedToOrder = true;
+                           router.push(`/orders/${created.id}`);
+                        } else {
+                           setPaymentInProgress && setPaymentInProgress(false);
+                           setIsSubmitting && setIsSubmitting(false);
+                           toast.error(
+                              `Payment initiation failed: ${
+                                 paymentResult.error || "Unknown error"
+                              }`
+                           );
+                           // Still redirect to order page so user can retry
+                           navigatedToOrder = true;
+                           router.push(`/orders/${created.id}`);
+                        }
+                     } catch (err: any) {
+                        console.error("Payment initiation failed:", err);
+                        setPaymentInProgress && setPaymentInProgress(false);
+                        setIsSubmitting && setIsSubmitting(false);
+                        toast.error(err?.message || "Failed to start payment. Please try again.");
+                        // Still redirect to order page so user can retry
+                        navigatedToOrder = true;
+                        router.push(`/orders/${created.id}`);
+                     }
+                  },
+                  onError: (error: any) => {
+                     console.error("createOrder.onError", error);
+                     setPaymentInProgress && setPaymentInProgress(false);
+                     setIsSubmitting && setIsSubmitting(false);
+                     toast.error(
+                        `Failed to create order: ${
+                           error?.message || "Unknown error"
+                        }`
+                     );
+                  },
+                  onSettled: () => {
+                     setIsSubmitting && setIsSubmitting(false);
+                     if (!navigatedToOrder) {
+                        setSuppressEmptyCartRedirect &&
+                           setSuppressEmptyCartRedirect(false);
+                     }
+                  },
+               });
+               return;
             }
 
             // Cash on delivery: create the order now

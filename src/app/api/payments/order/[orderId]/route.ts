@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceSupabaseClient } from '@/utils/supabase/service';
 import { logger } from '@/lib/logger';
+import { API_BASE } from '@/lib/api';
+
+// Helper to extract auth token from request
+function getAuthToken(request: NextRequest): string | null {
+   const authHeader = request.headers.get("authorization");
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+   }
+   return null;
+}
 
 interface RouteParams {
   params: Promise<{
@@ -21,69 +30,58 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Initialize Supabase client
-    const supabase = createServiceSupabaseClient();
+    // Get auth token from request headers
+    const authToken = getAuthToken(request);
 
-    // Fetch all payments for this order
-    const { data: payments, error: paymentsError } = await supabase
-      .from('payments')
-      .select('*')
-      .eq('order_id', orderId)
-      .order('created_at', { ascending: false });
+    // Forward request to backend
+    const backendUrl = `${API_BASE}/payments/order/${orderId}`;
+    const backendResponse = await fetch(backendUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+    });
 
-    if (paymentsError) {
-      logger.error('api', 'Failed to fetch payments', { orderId, error: paymentsError.message });
+    const backendData = await backendResponse.json();
+
+    if (!backendResponse.ok) {
+      logger.error('api', 'Backend payment list fetch failed', {
+        orderId,
+        status: backendResponse.status,
+        error: backendData.message || backendData.error,
+      });
       return NextResponse.json(
-        { error: 'Failed to fetch payments' },
-        { status: 500 }
+        {
+          error: backendData.message || backendData.error || 'Failed to fetch payments',
+        },
+        { status: backendResponse.status }
       );
     }
 
-    logger.info('api', 'Payments retrieved successfully', { 
+    // Transform backend response (camelCase to snake_case for compatibility)
+    const payments = (backendData.data || backendData || []).map((payment: any) => ({
+      ...payment,
+      order_id: payment.orderId || payment.order_id,
+      kpay_transaction_id: payment.kpayTransactionId || payment.kpay_transaction_id,
+      kpay_auth_key: payment.kpayAuthKey || payment.kpay_auth_key,
+      kpay_return_code: payment.kpayReturnCode || payment.kpay_return_code,
+      kpay_response: payment.kpayResponse || payment.kpay_response,
+      kpay_webhook_data: payment.kpayWebhookData || payment.kpay_webhook_data,
+      kpay_mom_transaction_id: payment.kpayMomTransactionId || payment.kpay_mom_transaction_id,
+      kpay_pay_account: payment.kpayPayAccount || payment.kpay_pay_account,
+      failure_reason: payment.failureReason || payment.failure_reason,
+      client_timeout: payment.clientTimeout || payment.client_timeout,
+      client_timeout_reason: payment.clientTimeoutReason || payment.client_timeout_reason,
+      created_at: payment.createdAt || payment.created_at,
+      updated_at: payment.updatedAt || payment.updated_at,
+      completed_at: payment.completedAt || payment.completed_at,
+    }));
+
+    logger.info('api', 'Payments retrieved successfully', {
       orderId,
       paymentCount: payments?.length || 0
     });
-    
-    // Check for pending payments and update their status
-    if (payments && payments.length > 0) {
-      const pendingPayments = payments.filter(p => p.status === 'pending' && p.kpay_transaction_id);
-      
-      if (pendingPayments.length > 0) {
-        logger.info('api', 'Found pending payments, checking for updates', { 
-          orderId,
-          pendingCount: pendingPayments.length 
-        });
-        
-        // Check status for each pending payment
-        for (const payment of pendingPayments) {
-          try {
-            const statusResponse = await fetch(`${request.nextUrl.origin}/api/payments/kpay/status`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ paymentId: payment.id })
-            });
-            
-            if (statusResponse.ok) {
-              const statusData = await statusResponse.json();
-              if (statusData.needsUpdate) {
-                payment.status = statusData.status;
-                logger.info('api', 'Payment status updated in list', { 
-                  paymentId: payment.id,
-                  newStatus: statusData.status 
-                });
-              }
-            }
-          } catch (statusError) {
-            logger.warn('api', 'Failed to check status for payment', { 
-              paymentId: payment.id,
-              error: statusError instanceof Error ? statusError.message : String(statusError)
-            });
-          }
-        }
-      }
-    }
 
     return NextResponse.json(payments || []);
 

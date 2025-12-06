@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-   initializeKPayService,
-   KPayService,
-   PAYMENT_METHODS,
-} from "@/lib/services/kpay";
-import { createServerSupabaseClient } from "@/utils/supabase/server";
 import { logger } from "@/lib/logger";
+import { API_BASE } from "@/lib/api";
 import { getPublicBaseUrl } from "@/lib/getPublicBaseUrl";
+
+// Helper to extract auth token from request
+function getAuthToken(request: NextRequest): string | null {
+   const authHeader = request.headers.get("authorization");
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+   }
+   return null;
+}
 
 interface RetryRequest {
    orderId: string;
@@ -14,7 +18,7 @@ interface RetryRequest {
    customerName: string;
    customerEmail: string;
    customerPhone: string;
-   paymentMethod: keyof typeof PAYMENT_METHODS;
+   paymentMethod: string;
    redirectUrl: string;
 }
 
@@ -32,195 +36,85 @@ export async function POST(request: NextRequest) {
          );
       }
 
-      const supabase = await createServerSupabaseClient();
+      logger.info("api", "Payment retry request received", {
+         orderId: body.orderId,
+         amount: body.amount,
+         paymentMethod: body.paymentMethod,
+      });
 
-      // Fetch the latest payment for this order
-      const { data: latestPayment } = await supabase
-         .from("payments")
-         .select("id, status, client_timeout, created_at")
-         .eq("order_id", body.orderId)
-         .order("created_at", { ascending: false })
-         .limit(1)
-         .single();
+      // Get auth token from request headers
+      const authToken = getAuthToken(request);
 
-      if (latestPayment) {
-         if (
-            latestPayment.status === "completed" ||
-            latestPayment.status === "successful"
-         ) {
-            return NextResponse.json(
-               { error: "Order already paid" },
-               { status: 400 }
-            );
-         }
-
-         if (
-            latestPayment.status === "pending" &&
-            !latestPayment.client_timeout
-         ) {
-            return NextResponse.json(
-               {
-                  error: "Existing payment in progress. Please wait or try after timeout.",
-               },
-               { status: 409 }
-            );
-         }
-      }
-
-      // Initialize KPay service
-      const kpayService = initializeKPayService();
-
-      const orderReference = KPayService.generateOrderReference();
-      const formattedPhone = KPayService.formatPhoneNumber(body.customerPhone);
-
-      // Create a new payment record with a simple retry on transient DB errors
-      let payment: any = null;
-      let paymentError: any = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-         const res = await supabase
-            .from("payments")
-            .insert({
-               order_id: body.orderId,
-               amount: body.amount,
-               currency: "RWF",
-               payment_method: body.paymentMethod,
-               status: "pending",
-               reference: orderReference,
-               customer_name: body.customerName,
-               customer_email: body.customerEmail,
-               customer_phone: formattedPhone,
-               created_at: new Date().toISOString(),
-            })
-            .select()
-            .single();
-
-         payment = (res as any).data;
-         paymentError = (res as any).error;
-
-         if (!paymentError && payment) break;
-
-         // small backoff
-         await new Promise((r) => setTimeout(r, 150 * attempt));
-      }
-
-      if (paymentError || !payment) {
-         const errMsg = paymentError
-            ? paymentError.message || String(paymentError)
-            : "no-data";
-         logger.error("api", "Failed to create retry payment record", {
+      // For retry, we just call the initiate endpoint again with the same orderId
+      // The backend will handle creating a new payment record
+      const backendUrl = `${API_BASE}/payments/initiate`;
+      const backendResponse = await fetch(backendUrl, {
+         method: "POST",
+         headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+         },
+         body: JSON.stringify({
             orderId: body.orderId,
-            error: errMsg,
+            amount: body.amount,
+            customerName: body.customerName,
+            customerEmail: body.customerEmail,
+            customerPhone: body.customerPhone,
+            customerNumber: body.customerPhone,
+            paymentMethod: body.paymentMethod,
+            redirectUrl: body.redirectUrl || `${appBaseUrl}/payment/${body.orderId}`,
+            orderDetails: `Order ${body.orderId} retry payment`,
+         }),
+      });
+
+      const backendData = await backendResponse.json();
+
+      if (!backendResponse.ok) {
+         logger.error("api", "Backend payment retry failed", {
+            orderId,
+            status: backendResponse.status,
+            error: backendData.message || backendData.error,
          });
-
-         // Handle duplicate key on order_id: return existing payment so client can proceed
-         if (
-            errMsg.includes("duplicate key value") ||
-            errMsg.includes("payments_order_id_key")
-         ) {
-            try {
-               const { data: existing } = await supabase
-                  .from("payments")
-                  .select(
-                     "id, status, kpay_transaction_id, reference, kpay_response"
-                  )
-                  .eq("order_id", body.orderId)
-                  .order("created_at", { ascending: false })
-                  .limit(1)
-                  .single();
-
-               if (existing) {
-                  return NextResponse.json({
-                     success: true,
-                     paymentId: existing.id,
-                     transactionId: existing.kpay_transaction_id,
-                     checkoutUrl: existing.kpay_response?.url || null,
-                     status: existing.status || "pending",
-                  });
-               }
-            } catch (fetchErr) {
-               logger.warn(
-                  "api",
-                  "Failed to fetch existing payment after duplicate key",
-                  {
-                     orderId: body.orderId,
-                     error:
-                        fetchErr instanceof Error
-                           ? fetchErr.message
-                           : String(fetchErr),
-                  }
-               );
-            }
-         }
-
-         // Temporarily return technical error to help diagnose production issue
          return NextResponse.json(
             {
-               error: "Failed to create payment record",
-               technicalError: errMsg,
+               success: false,
+               error: backendData.message || backendData.error || "Payment retry failed",
             },
-            { status: 500 }
+            { status: backendResponse.status }
          );
       }
 
-      // Initiate payment with KPay
-      const kpayResponse = await kpayService.initiatePayment({
-         amount: body.amount,
-         customerName: body.customerName,
-         customerEmail: body.customerEmail,
-         customerPhone: formattedPhone,
-         customerNumber: "",
-         paymentMethod: body.paymentMethod,
-         orderReference,
-         orderDetails: `Order #${body.orderId} retry payment`,
-         redirectUrl: body.redirectUrl,
-         logoUrl:
-            process.env.NEXT_PUBLIC_LOGO_URL || `${appBaseUrl}/logo.png`,
+      // Transform backend response to match frontend expectations
+      const kpayData = backendData.data || {};
+      const checkoutUrl = kpayData.url || kpayData.redirecturl || kpayData.redirectUrl;
+
+      logger.info("api", "Payment retry initiated successfully", {
+         orderId,
+         transactionId: kpayData.tid,
+         checkoutUrl: !!checkoutUrl,
       });
 
-      // Update payment record with kpay info
-      await supabase
-         .from("payments")
-         .update({
-            kpay_transaction_id: kpayResponse.tid,
-            kpay_auth_key: kpayResponse.authkey,
-            kpay_return_code: kpayResponse.retcode,
-            kpay_response: kpayResponse,
-            updated_at: new Date().toISOString(),
-         })
-         .eq("id", payment.id);
-
-      if (kpayResponse.retcode === 0) {
-         return NextResponse.json({
-            success: true,
-            paymentId: payment.id,
-            transactionId: kpayResponse.tid,
-            checkoutUrl: kpayResponse.url,
-            status: "pending",
-         });
-      }
-
-      // On failure to initiate
-      const errorMessage = kpayService.getErrorMessage(kpayResponse.retcode);
-      await supabase
-         .from("payments")
-         .update({
-            status: "failed",
-            failure_reason: errorMessage,
-            updated_at: new Date().toISOString(),
-         })
-         .eq("id", payment.id);
-
-      return NextResponse.json(
-         { success: false, error: errorMessage },
-         { status: 400 }
-      );
+      return NextResponse.json({
+         success: true,
+         data: kpayData,
+         checkoutUrl,
+         transactionId: kpayData.tid,
+         reference: kpayData.reference || kpayData.orderReference,
+         status: "pending",
+         message: "Payment retry initiated successfully",
+      });
    } catch (error) {
-      logger.error("api", "Retry payment failed", {
+      logger.error("api", "Payment retry failed", {
          orderId,
          error: error instanceof Error ? error.message : String(error),
       });
       return NextResponse.json(
-         { error: "Internal server error" },
+         {
+            success: false,
+            error: "Internal server error",
+            technicalError:
+               error instanceof Error ? error.message : String(error),
+         },
          { status: 500 }
       );
    }
