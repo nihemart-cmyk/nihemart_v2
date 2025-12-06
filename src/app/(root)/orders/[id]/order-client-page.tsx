@@ -53,18 +53,22 @@ import Image from "next/image";
 import { fetchStoreProductById } from "@/integrations/supabase/store";
 
 interface OrderClientPageProps {
-   initialData: Order;
-   user: User;
-   isAdmin: boolean;
+   initialData?: Order;
+   user?: User;
+   isAdmin?: boolean;
+   orderId?: string;
 }
 
 const OrderClientPage = ({
    initialData,
-   user,
-   isAdmin,
+   user: propUser,
+   isAdmin: propIsAdmin,
+   orderId,
 }: OrderClientPageProps) => {
    const { t } = useLanguage();
+   const { user: authUser, hasRole } = useAuth();
    const {
+      useOrder,
       updateOrderStatus,
       useRequestRefundItem,
       useCancelRefundRequestItem,
@@ -74,8 +78,14 @@ const OrderClientPage = ({
    } = useOrders();
    const router = useRouter();
 
+   // Fetch order if orderId is provided, otherwise use initialData
+   const { data: fetchedOrder, isLoading: isLoadingOrder } = useOrder(orderId || "");
+   const orderData = fetchedOrder || initialData;
+   const user = authUser || propUser;
+   const isAdmin = propIsAdmin !== undefined ? propIsAdmin : (hasRole ? hasRole("admin") : false);
+
    // Use optimistic updates for better UX
-   const [optimisticOrder, setOptimisticOrder] = useOptimistic(initialData);
+   const [optimisticOrder, setOptimisticOrder] = useOptimistic(orderData || ({} as Order));
 
    const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
    const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -95,8 +105,32 @@ const OrderClientPage = ({
       null
    );
 
-   const order = optimisticOrder;
+   const order = optimisticOrder || orderData;
    const isOwner = user?.id === order?.user_id;
+
+   // Show loading state while fetching
+   if (orderId && isLoadingOrder) {
+      return (
+         <div className="container mx-auto px-4 py-8">
+            <div className="flex items-center justify-center min-h-[400px]">
+               <Loader2 className="h-8 w-8 animate-spin" />
+               <span className="ml-2">Loading order...</span>
+            </div>
+         </div>
+      );
+   }
+
+   // Show error if order not found
+   if (!order) {
+      return (
+         <div className="container mx-auto px-4 py-8">
+            <div className="text-center">
+               <h1 className="text-2xl font-bold mb-4">Order not found</h1>
+               <Button onClick={() => router.push("/orders")}>Back to Orders</Button>
+            </div>
+         </div>
+      );
+   }
 
    // Load canonical product images for items (prefer main_image_url)
    const [productImages, setProductImages] = useState<

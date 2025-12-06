@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation';
-import { fetchOrderById } from '@/integrations/supabase/orders';
 import OrderClientPage from './order-client-page';
-import { createClient } from '@/utils/supabase/server';
 import { Metadata } from 'next';
+import { cookies } from 'next/headers';
 
 interface OrderPageProps {
   params: Promise<{ id: string }>;
@@ -25,47 +24,15 @@ export default async function OrderPage({ params }: OrderPageProps) {
     redirect('/orders');
   }
 
-  // Get authenticated user
-  let supabase;
-  try {
-    supabase = await createClient();
-  } catch (error) {
-    console.error('Failed to create Supabase client:', error);
-    redirect('/signin');
-  }
+  // Check if user is authenticated
+  const cookieStore = await cookies();
+  const token = cookieStore.get('auth-token')?.value;
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-  if (authError || !user) {
+  if (!token) {
     redirect(`/signin?redirect=/orders/${id}`);
   }
 
-  // Fetch order data
-  let orderData;
-  try {
-    orderData = await fetchOrderById(id);
-  } catch (error) {
-    console.error('Failed to fetch order:', error);
-    redirect('/orders');
-  }
-
-  if (!orderData) {
-    redirect('/orders');
-  }
-
-  // Check if user has permission to view this order
-  const { data: userProfile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  const isAdmin = userProfile?.role === 'admin';
-  const isOwner = orderData.user_id === user.id;
-
-  if (!isAdmin && !isOwner) {
-    redirect('/orders');
-  }
-
-  return <OrderClientPage initialData={orderData} user={user} isAdmin={isAdmin} />;
+  // Client component will fetch the order using the hook
+  // Pass minimal props - client component will handle fetching
+  return <OrderClientPage orderId={id} />;
 }
