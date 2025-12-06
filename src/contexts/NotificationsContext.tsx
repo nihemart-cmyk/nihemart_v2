@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { fetchRiderByUserId } from "@/integrations/supabase/riders";
+import { useMyRiderProfile } from "@/hooks/useRiders";
 import { toast } from "sonner";
 import { formatRiderInfo } from "@/utils/notification-formatters";
 
@@ -44,10 +44,13 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
    const { user, hasRole } = useAuth();
    const [notifications, setNotifications] = useState<Notification[]>([]);
-   const [riderId, setRiderId] = useState<string | null>(null);
    const channelRef = useRef<any | null>(null);
    // compute boolean admin status so the effect can depend on it and re-run
    const isAdmin = Boolean(hasRole && hasRole("admin"));
+   
+   // Get rider profile if user is a rider
+   const { data: rider } = useMyRiderProfile();
+   const riderId = rider?.id || null;
 
    useEffect(() => {
       if (!user) return;
@@ -109,77 +112,53 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const fetchPersisted = async () => {
          try {
-            // fetch notifications for this user (explicit recipient_user_id)
-            const resUser = await fetch(
-               `/api/notifications?userId=${encodeURIComponent(
-                  user.id
-               )}&limit=100`
-            );
-            const userJson = resUser.ok
-               ? await resUser.json()
-               : { notifications: [] };
-            let combined: Notification[] = userJson.notifications || [];
+            // Use backend API to fetch notifications
+            const { authorizedAPI } = await import("@/lib/api");
+            const handleApiRequest = (await import("@/lib/handleApiRequest")).default;
+            
+            let combined: Notification[] = [];
 
-            // Also fetch any notifications where meta includes this user id (fallback)
+            // Fetch user-specific notifications (default behavior - backend filters by userId)
             try {
-               const resMeta = await fetch(`/api/notifications?limit=200`);
-               if (resMeta.ok) {
-                  const metaJson = await resMeta.json();
-                  const metaFiltered = (metaJson.notifications || []).filter(
-                     (n: any) => {
-                        try {
-                           const meta =
-                              typeof n.meta === "string"
-                                 ? JSON.parse(n.meta)
-                                 : n.meta || {};
-                           return (
-                              meta &&
-                              (String(meta.user_id) === String(user.id) ||
-                                 String(meta.recipient_user_id) ===
-                                    String(user.id))
-                           );
-                        } catch (e) {
-                           return false;
-                        }
-                     }
-                  );
-                  combined = [...metaFiltered, ...combined];
-               }
+               const userNotifications = await handleApiRequest(() =>
+                  authorizedAPI.get("/notifications?limit=100")
+               );
+               // Backend returns { notifications: [...] } or just array
+               const notifications = Array.isArray(userNotifications)
+                  ? userNotifications
+                  : userNotifications?.notifications || [];
+               combined = [...notifications, ...combined];
             } catch (e) {
-               // ignore
+               console.warn("Failed to fetch user notifications:", e);
             }
 
-            // fetch role-based notifications: admin
+            // Fetch role-based notifications: admin
             if (hasRole && hasRole("admin")) {
-               const resAdmin = await fetch(
-                  `/api/notifications?role=admin&limit=100`
-               );
-               if (resAdmin.ok) {
-                  const adminJson = await resAdmin.json();
-                  combined = [...(adminJson.notifications || []), ...combined];
+               try {
+                  const adminNotifications = await handleApiRequest(() =>
+                     authorizedAPI.get("/notifications?role=admin&limit=100")
+                  );
+                  const notifications = Array.isArray(adminNotifications)
+                     ? adminNotifications
+                     : adminNotifications?.notifications || [];
+                  combined = [...notifications, ...combined];
+               } catch (e) {
+                  console.warn("Failed to fetch admin notifications:", e);
                }
             }
 
-            // fetch rider role notifications (fallback), filter by riderId if available
-            // fetch rider mapping for this user to include rider-role fallback notifications
-            let foundRiderId: string | null = null;
-            try {
-               const rider = await fetchRiderByUserId(user.id);
-               if (rider && rider.id) {
-                  foundRiderId = rider.id;
-                  if (!riderId) setRiderId(rider.id);
-               }
-            } catch (err) {
-               // ignore
-            }
-
+            // Fetch rider role notifications (fallback), filter by riderId if available
+            const foundRiderId = riderId;
+            
             if (foundRiderId) {
-               const resRider = await fetch(
-                  `/api/notifications?role=rider&limit=200`
-               );
-               if (resRider.ok) {
-                  const riderJson = await resRider.json();
-                  const riderFiltered = (riderJson.notifications || []).filter(
+               try {
+                  const riderNotifications = await handleApiRequest(() =>
+                     authorizedAPI.get("/notifications?role=rider&limit=200")
+                  );
+                  const notifications = Array.isArray(riderNotifications)
+                     ? riderNotifications
+                     : riderNotifications?.notifications || [];
+                  const riderFiltered = notifications.filter(
                      (n: any) => {
                         try {
                            const meta =
@@ -197,6 +176,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
                      }
                   );
                   combined = [...riderFiltered, ...combined];
+               } catch (e) {
+                  console.warn("Failed to fetch rider notifications:", e);
                }
             }
 
@@ -595,13 +576,14 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
    const markAsRead = async (id: string) => {
       try {
-         // Call mark-read API
-         const res = await fetch(`/api/notifications/mark-read`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids: [id] }),
-         });
-         if (!res.ok) throw new Error("Failed to mark as read");
+         // Use backend API to mark as read
+         const { authorizedAPI } = await import("@/lib/api");
+         const handleApiRequest = (await import("@/lib/handleApiRequest")).default;
+         
+         await handleApiRequest(() =>
+            authorizedAPI.patch(`/notifications/${id}/read`)
+         );
+         
          setNotifications((prev) =>
             prev.map((p) => (p.id === id ? { ...p, read: true } : p))
          );
@@ -616,22 +598,11 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
    const clear = async () => {
       try {
-         // Attempt to clear persisted notifications for this user via API
-         if (user && user.id) {
-            const res = await fetch(`/api/notifications/clear`, {
-               method: "POST",
-               headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ userId: user.id }),
-            });
-            if (!res.ok) {
-               console.warn(
-                  "Failed to clear notifications server-side",
-                  res.statusText
-               );
-            }
-         }
+         // Backend doesn't have a clear-all endpoint, so we'll just clear locally
+         // Individual notifications can be deleted via DELETE /api/notifications/:id
+         // For now, we'll just clear the local state
       } catch (e) {
-         console.warn("notifications clear API call failed:", e);
+         console.warn("notifications clear failed:", e);
       }
       // Always clear local state for immediate UX
       setNotifications([]);

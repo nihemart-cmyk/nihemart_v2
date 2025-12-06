@@ -24,8 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { fetchRiderByUserId } from "@/integrations/supabase/riders";
-import { useRiderAssignments, useRespondToAssignment } from "@/hooks/useRiders";
+import { useMyRiderProfile, useMyAssignments, useRespondToAssignment } from "@/hooks/useRiders";
 import { fetchOrderById } from "@/integrations/supabase/orders";
 import { OrderDetailsDialog } from "@/components/orders/OrderDetailsDialog";
 import {
@@ -44,29 +43,10 @@ import {
 const Page = () => {
    const { user, isLoggedIn } = useAuth();
    const { t } = useLanguage();
-   const [riderId, setRiderId] = useState<string | null>(null);
-   const [loadingRider, setLoadingRider] = useState(false);
-
    const respond = useRespondToAssignment();
 
-   useEffect(() => {
-      if (!user) return;
-      (async () => {
-         setLoadingRider(true);
-         try {
-            const r = await fetchRiderByUserId(user.id);
-            setRiderId(r?.id || null);
-         } catch (err) {
-            console.error("Failed to fetch rider for user", err);
-         } finally {
-            setLoadingRider(false);
-         }
-      })();
-   }, [user]);
-
-   const { data: assignments, isLoading } = useRiderAssignments(
-      riderId || undefined
-   );
+   const { data: rider, isLoading: loadingRider } = useMyRiderProfile();
+   const { data: assignments, isLoading } = useMyAssignments();
 
    // Cache for order details when assignment does not include joined order data
    const [orderMap, setOrderMap] = useState<Record<string, any>>({});
@@ -100,16 +80,18 @@ const Page = () => {
    // Prepare table data and columns in stable hooks to avoid changing hook order
    const data = useMemo(() => {
       return (assignments || []).map((a: any) => {
+         // Backend returns assignment with order included
          let order: any = null;
-         if (a.orders) order = a.orders;
-         if (!order && a.order) order = a.order;
+         if (a.order) order = a.order;
+         if (!order && a.orders) order = a.orders; // Fallback for old format
          if (typeof order === "string") {
             try {
                order = JSON.parse(order);
             } catch (e) {}
          }
          if (Array.isArray(order)) order = order[0] || null;
-         if (!order && orderMap[a.order_id]) order = orderMap[a.order_id];
+         if (!order && orderMap[a.orderId]) order = orderMap[a.orderId];
+         if (!order && orderMap[a.order_id]) order = orderMap[a.order_id]; // Fallback
 
          const location =
             order?.delivery_address ||
@@ -132,13 +114,15 @@ const Page = () => {
          return {
             assignment: a,
             order,
-            orderNumber: order?.order_number
+            orderNumber: order?.orderNumber
+               ? `#${order.orderNumber}`
+               : order?.order_number
                ? `#${order.order_number}`
-               : `#${a.order_id}`,
+               : `#${a.orderId || a.order_id}`,
             location,
             deliveryFee,
             status: a.status,
-            assignedAt: a.assigned_at,
+            assignedAt: a.assignedAt || a.assigned_at,
          };
       });
    }, [assignments, orderMap]);
@@ -314,14 +298,15 @@ const Page = () => {
                         <DropdownMenuContent align="end">
                            <DropdownMenuItem
                               onClick={async () => {
-                                 let o = order || orderMap[a.order_id];
-                                 if (!o) {
+                                 const orderId = a.orderId || a.order_id;
+                                 let o = order || orderMap[orderId];
+                                 if (!o && orderId) {
                                     try {
-                                       o = await fetchOrderById(a.order_id);
+                                       o = await fetchOrderById(orderId);
                                        if (o)
                                           setOrderMap((p) => ({
                                              ...p,
-                                             [a.order_id]: o,
+                                             [orderId]: o,
                                           }));
                                     } catch (e) {}
                                  }
@@ -366,7 +351,7 @@ const Page = () => {
       if (!assignments || assignments.length === 0) return;
 
       const missingIds = assignments
-         .map((a: any) => a.order_id)
+         .map((a: any) => a.orderId || a.order_id)
          .filter((id: any) => id && !orderMap[id]);
 
       if (missingIds.length === 0) return;
@@ -439,7 +424,7 @@ const Page = () => {
       );
    }
 
-   if (!riderId) {
+   if (!rider) {
       return (
          <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 flex items-center justify-center p-6">
             <Card className="w-full max-w-md">
@@ -448,7 +433,7 @@ const Page = () => {
                      No Rider Profile
                   </h2>
                   <p className="text-gray-600">
-                     No rider profile found for your account.
+                     No rider profile found for your account. Please contact an administrator.
                   </p>
                </CardContent>
             </Card>
@@ -622,23 +607,21 @@ const Page = () => {
                                                 <DropdownMenuContent align="end">
                                                    <DropdownMenuItem
                                                       onClick={async () => {
+                                                         const orderId = a.orderId || a.order_id;
                                                          let o =
                                                             order ||
-                                                            orderMap[
-                                                               a.order_id
-                                                            ];
-                                                         if (!o) {
+                                                            orderMap[orderId];
+                                                         if (!o && orderId) {
                                                             try {
                                                                o =
                                                                   await fetchOrderById(
-                                                                     a.order_id
+                                                                     orderId
                                                                   );
                                                                if (o)
                                                                   setOrderMap(
                                                                      (p) => ({
                                                                         ...p,
-                                                                        [a.order_id]:
-                                                                           o,
+                                                                        [orderId]: o,
                                                                      })
                                                                   );
                                                             } catch (e) {}
@@ -652,13 +635,14 @@ const Page = () => {
                                                    </DropdownMenuItem>
                                                    <DropdownMenuItem
                                                       onClick={() => {
+                                                         const orderId = a.orderId || a.order_id;
                                                          if (
                                                             typeof navigator !==
                                                                "undefined" &&
                                                             navigator.clipboard
                                                          )
                                                             navigator.clipboard.writeText(
-                                                               a.order_id || ""
+                                                               orderId || ""
                                                             );
                                                          toast.success(
                                                             "Order ID copied to clipboard"

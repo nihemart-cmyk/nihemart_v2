@@ -23,10 +23,9 @@ import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff, Loader } from "lucide-react";
 import { toast } from "sonner";
 import { setEmailCookie } from "@/utils/emailCookie";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth, useGoogleAuthUrl } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { GoogleSignInButton } from "./google-signin-button";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -38,6 +37,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
    const [showPassword, setShowPassword] = useState<boolean>(false);
    const [googleLoading, setGoogleLoading] = useState(false);
    const { signIn, hasRole, user, loading } = useAuth();
+   const { mutateAsync: getGoogleAuthUrl } = useGoogleAuthUrl();
    const router = useRouter();
    // Use the prop if provided, otherwise derive from window.location in effect
    const [redirectParamState, setRedirectParamState] = useState<string | null>(
@@ -69,7 +69,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
       }
    }, []);
 
-   // Google sign-in handler - FIXED
+   // Google sign-in handler
    const { t } = useLanguage();
 
    const handleGoogleSignIn = async () => {
@@ -78,8 +78,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          const origin =
             typeof window !== "undefined" ? window.location.origin : "";
 
-         // CRITICAL: Store redirect in localStorage before OAuth redirect
-         // because Supabase OAuth doesn't reliably preserve query parameters
+         // Store redirect in localStorage before OAuth redirect
          if (redirectParam) {
             try {
                localStorage.setItem("oauth_redirect", redirectParam);
@@ -96,13 +95,15 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
             }
          }
 
-         // Build callback URL - don't add redirect as query param
-         // because it will likely be stripped by OAuth flow
-         const redirectTo = `${origin}/auth/callback`;
+         // Build callback URL
+         const callbackUrl = `${origin}/auth/callback`;
+         const state = redirectParam
+            ? encodeURIComponent(redirectParam)
+            : undefined;
 
          console.log("Starting Google OAuth...");
-         console.log("- Origin redirect param:", redirectParam);
-         console.log("- Callback URL:", redirectTo);
+         console.log("- Redirect param:", redirectParam);
+         console.log("- Callback URL:", callbackUrl);
 
          // Inform the user that we're redirecting them to Google
          try {
@@ -111,29 +112,11 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
             // ignore toast errors
          }
 
-         const { error } = await supabase.auth.signInWithOAuth({
-            provider: "google",
-            options: {
-               redirectTo,
-               queryParams: {
-                  access_type: "offline",
-               },
-            },
-         });
+         // Get Google OAuth URL from backend
+         const { url } = await getGoogleAuthUrl(state);
 
-         // Note: Most OAuth flows will redirect before we reach here
-         // Only handle errors that prevent the redirect
-         if (error) {
-            console.error("Google OAuth initiation error:", error);
-            toast.error(t("auth.google.startFailed"));
-
-            // Clear stored redirect on error
-            try {
-               localStorage.removeItem("oauth_redirect");
-            } catch (e) {
-               // ignore
-            }
-         }
+         // Redirect to Google OAuth
+         window.location.href = url;
       } catch (err: any) {
          console.error("Google sign-in failed:", err);
          toast.error(err?.message || t("auth.google.failed"));
@@ -144,8 +127,6 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          } catch (e) {
             // ignore
          }
-      } finally {
-         // Note: This may not execute if OAuth redirect happens
          setGoogleLoading(false);
       }
    };

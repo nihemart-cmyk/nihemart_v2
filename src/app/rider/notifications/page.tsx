@@ -72,11 +72,13 @@ const RiderNotificationsPage = () => {
          if (markAsRead) {
             await Promise.all(unreadIds.map((id: string) => markAsRead(id)));
          } else {
-            await fetch(`/api/notifications/mark-read`, {
-               method: "POST",
-               headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ ids: unreadIds }),
-            });
+            // Use backend API to mark all as read
+            const { authorizedAPI } = await import("@/lib/api");
+            const handleApiRequest = (await import("@/lib/handleApiRequest")).default;
+            
+            await handleApiRequest(() =>
+               authorizedAPI.patch("/notifications/read-all")
+            );
          }
 
          setLocalNotifications((prev) =>
@@ -103,11 +105,13 @@ const RiderNotificationsPage = () => {
          if (markAsRead) {
             await markAsRead(notificationId);
          } else {
-            await fetch(`/api/notifications/mark-read`, {
-               method: "POST",
-               headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({ ids: [notificationId] }),
-            });
+            // Use backend API to mark as read
+            const { authorizedAPI } = await import("@/lib/api");
+            const handleApiRequest = (await import("@/lib/handleApiRequest")).default;
+            
+            await handleApiRequest(() =>
+               authorizedAPI.patch(`/notifications/${notificationId}/read`)
+            );
          }
          setLocalNotifications((prev) =>
             prev.map((p) =>
@@ -286,19 +290,9 @@ const RiderNotificationsPage = () => {
                                        if (clear) {
                                           await clear();
                                        } else {
-                                          await fetch(
-                                             `/api/notifications/clear`,
-                                             {
-                                                method: "POST",
-                                                headers: {
-                                                   "Content-Type":
-                                                      "application/json",
-                                                },
-                                                body: JSON.stringify({
-                                                   userId: user?.id,
-                                                }),
-                                             }
-                                          );
+                                          // Clear is handled by the context
+                                          // Backend doesn't have a clear-all endpoint
+                                          // Individual notifications can be deleted if needed
                                        }
                                        setLocalNotifications([]);
                                        toast.success(

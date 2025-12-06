@@ -24,8 +24,7 @@ import { UserAvatarProfile } from "@/components/user-avatar-profile";
 import React, { useEffect, useState } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
-import { fetchRiderByUserId } from "@/integrations/supabase/riders";
-import { useRiderAssignments } from "@/hooks/useRiders";
+import { useMyRiderProfile, useMyAssignments } from "@/hooks/useRiders";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import {
    Select,
@@ -280,7 +279,8 @@ const RecentDelivery: React.FC<RecentDeliveryProps> = ({
 
 const Dashboard = () => {
    const { user, isLoggedIn } = useAuth();
-   const [rider, setRider] = useState<any | null>(null);
+   const { t } = useLanguage();
+   
    // replace calendar with timeframe selector for analytics
    const [timeframe, setTimeframe] = useState<string>("7");
    // date range for filtering (from/to strings like admin/orders)
@@ -288,16 +288,8 @@ const Dashboard = () => {
       {}
    );
 
-   const { t } = useLanguage();
-
-   useEffect(() => {
-      if (!user) return;
-      fetchRiderByUserId(user.id)
-         .then((r) => setRider(r))
-         .catch(console.error);
-   }, [user]);
-
-   const { data: assignments = [], isLoading } = useRiderAssignments(rider?.id);
+   const { data: rider, isLoading: loadingRider } = useMyRiderProfile();
+   const { data: assignments = [], isLoading } = useMyAssignments();
 
    const totalDeliveries = assignments.length;
    const delivered = assignments.filter(
@@ -320,8 +312,7 @@ const Dashboard = () => {
    const earned = assignments.reduce((sum: number, a: any) => {
       const isDone = a.status === "completed" || a.status === "delivered";
       if (!isDone) return sum;
-      const order =
-         a.orders || a.order || (a.order_id ? { id: a.order_id } : null);
+      const order = a.order || a.orders || (a.orderId || a.order_id ? { id: a.orderId || a.order_id } : null);
       // Get delivery fee from order.tax field instead of total amount
       const deliveryFee = order?.tax ?? a.delivery_fee ?? a.fee ?? 0;
       const parsed =
@@ -361,17 +352,17 @@ const Dashboard = () => {
       };
 
       return assignments.filter((a: any) => {
-         const order = a.orders || a.order || null;
+         const order = a.order || a.orders || null;
          const timestamps = [
-            a.assigned_at,
-            a.delivered_at,
-            a.completed_at,
-            a.updated_at,
-            a.created_at,
-            order?.delivered_at,
-            order?.completed_at,
-            order?.updated_at,
-            order?.created_at,
+            a.assignedAt || a.assigned_at,
+            a.deliveredAt || a.delivered_at,
+            a.completedAt || a.completed_at,
+            a.updatedAt || a.updated_at,
+            a.createdAt || a.created_at,
+            order?.deliveredAt || order?.delivered_at,
+            order?.completedAt || order?.completed_at,
+            order?.updatedAt || order?.updated_at,
+            order?.createdAt || order?.created_at,
          ]
             .map(parseDate)
             .filter(Boolean) as Date[];
@@ -390,19 +381,18 @@ const Dashboard = () => {
    const selectedDateAssignments = filteredAssignments;
 
    const recent = filteredAssignments.slice(0, 5).map((a: any) => {
-      const order =
-         a.orders || a.order || (a.order_id ? { id: a.order_id } : null);
+      const order = a.order || a.orders || (a.orderId || a.order_id ? { id: a.orderId || a.order_id } : null);
       // pick first valid timestamp to represent the event time
       const timestamps = [
-         a.delivered_at,
-         a.completed_at,
-         a.updated_at,
-         a.assigned_at,
-         a.created_at,
-         order?.delivered_at,
-         order?.completed_at,
-         order?.updated_at,
-         order?.created_at,
+         a.deliveredAt || a.delivered_at,
+         a.completedAt || a.completed_at,
+         a.updatedAt || a.updated_at,
+         a.assignedAt || a.assigned_at,
+         a.createdAt || a.created_at,
+         order?.deliveredAt || order?.delivered_at,
+         order?.completedAt || order?.completed_at,
+         order?.updatedAt || order?.updated_at,
+         order?.createdAt || order?.created_at,
       ]
          .map((v: any) => (v ? new Date(v) : null))
          .filter(Boolean) as Date[];
@@ -415,19 +405,22 @@ const Dashboard = () => {
          : t("rider.noRecentDeliveries");
 
       return {
-         id: order?.id || a.order_id,
+         id: order?.id || a.orderId || a.order_id,
          // prefer explicit order number/reference when available for better UX
          number:
+            order?.orderNumber ||
             order?.order_number ||
             order?.number ||
             order?.reference ||
             order?.id ||
+            a.orderNumber ||
             a.order_number ||
+            a.orderId ||
             a.order_id,
-         name: order?.customer_name || order?.name || "Customer",
+         name: order?.customerName || order?.customer_name || order?.name || "Customer",
          location:
-            order?.delivery_address || a.location || rider?.location || "-",
-         amount: order?.tax || a.delivery_fee || a.fee || "-", // Show delivery fee instead of total
+            order?.deliveryAddress || order?.delivery_address || a.location || rider?.location || "-",
+         amount: order?.tax || a.deliveryFee || a.delivery_fee || a.fee || "-", // Show delivery fee instead of total
          time: timeStr,
          status: a.status || order?.status || "-",
       };
@@ -437,10 +430,9 @@ const Dashboard = () => {
       (sum: number, a: any) => {
          const isDone = a.status === "completed" || a.status === "delivered";
          if (!isDone) return sum;
-         const order =
-            a.orders || a.order || (a.order_id ? { id: a.order_id } : null);
+         const order = a.order || a.orders || (a.orderId || a.order_id ? { id: a.orderId || a.order_id } : null);
          // Get delivery fee from order.tax field instead of total amount
-         const deliveryFee = order?.tax ?? a.delivery_fee ?? a.fee ?? 0;
+         const deliveryFee = order?.tax ?? a.deliveryFee ?? a.delivery_fee ?? a.fee ?? 0;
          const parsed =
             typeof deliveryFee === "string"
                ? parseFloat(deliveryFee)
@@ -453,16 +445,16 @@ const Dashboard = () => {
    const peakHour = (() => {
       const hoursCount: Record<string, number> = {};
       selectedDateAssignments.forEach((a: any) => {
-         const order = a.orders || a.order || null;
+         const order = a.order || a.orders || null;
          const timestamps = [
-            a.delivered_at,
-            a.completed_at,
-            a.updated_at,
-            a.created_at,
-            order?.delivered_at,
-            order?.completed_at,
-            order?.updated_at,
-            order?.created_at,
+            a.deliveredAt || a.delivered_at,
+            a.completedAt || a.completed_at,
+            a.updatedAt || a.updated_at,
+            a.createdAt || a.created_at,
+            order?.deliveredAt || order?.delivered_at,
+            order?.completedAt || order?.completed_at,
+            order?.updatedAt || order?.updated_at,
+            order?.createdAt || order?.created_at,
          ]
             .map(parseDate)
             .filter(Boolean) as Date[];
@@ -479,16 +471,44 @@ const Dashboard = () => {
 
    const averageRating = rider?.average_rating || rider?.rating || "4.8";
 
-   if (!isLoggedIn) {
+   if (!isLoggedIn || loadingRider) {
+      return (
+         <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 flex items-center justify-center p-4">
+            <Card className="p-6 sm:p-8 text-center max-w-md w-full">
+               <CardContent>
+                  {loadingRider ? (
+                     <>
+                        <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                        <p className="text-sm sm:text-base text-gray-600">
+                           Loading rider profile...
+                        </p>
+                     </>
+                  ) : (
+                     <>
+                        <h2 className="text-lg sm:text-xl font-semibold mb-2">
+                           {t("rider.signInTitle")}
+                        </h2>
+                        <p className="text-sm sm:text-base text-gray-600">
+                           {t("rider.signInDesc")}
+                        </p>
+                     </>
+                  )}
+               </CardContent>
+            </Card>
+         </div>
+      );
+   }
+
+   if (!rider) {
       return (
          <div className="min-h-screen bg-gradient-to-br from-orange-50 to-blue-50 flex items-center justify-center p-4">
             <Card className="p-6 sm:p-8 text-center max-w-md w-full">
                <CardContent>
                   <h2 className="text-lg sm:text-xl font-semibold mb-2">
-                     {t("rider.signInTitle")}
+                     No Rider Profile
                   </h2>
                   <p className="text-sm sm:text-base text-gray-600">
-                     {t("rider.signInDesc")}
+                     No rider profile found for your account. Please contact an administrator.
                   </p>
                </CardContent>
             </Card>

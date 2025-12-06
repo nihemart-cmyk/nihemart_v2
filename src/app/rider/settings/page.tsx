@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useRiderByUserId } from "@/hooks/useRiders";
+import { useMyRiderProfile } from "@/hooks/useRiders";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,7 +53,7 @@ export default function RiderSettingsPage() {
    const { user } = useAuth();
    // Editing is revoked for riders: make this page view-only
    const [saving, setSaving] = useState(false);
-   const { data: rider, isLoading: loading } = useRiderByUserId(user?.id);
+   const { data: rider, isLoading: loading } = useMyRiderProfile();
 
    // Local state used only for display; inputs are disabled
    const [fullName] = React.useState("");
