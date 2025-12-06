@@ -2,7 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+<<<<<<< HEAD
 import { useMyRiderProfile } from "@/hooks/useRiders";
+=======
+import { useRiderByUserId } from "@/hooks/useRiders";
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,7 +57,11 @@ export default function RiderSettingsPage() {
    const { user } = useAuth();
    // Editing is revoked for riders: make this page view-only
    const [saving, setSaving] = useState(false);
+<<<<<<< HEAD
    const { data: rider, isLoading: loading } = useMyRiderProfile();
+=======
+   const { data: rider, isLoading: loading } = useRiderByUserId(user?.id);
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
    // Local state used only for display; inputs are disabled
    const [fullName] = React.useState("");

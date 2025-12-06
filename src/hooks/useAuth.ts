@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore, type AppRole } from "@/store/auth.store";
 import { unauthorizedAPI, authorizedAPI } from "@/lib/api";
@@ -334,4 +335,23 @@ export function useAuth() {
     },
     hasRole: (role: AppRole) => hasRole(role),
   };
+=======
+import { useAuthStore } from "@/store/auth.store";
+
+export function useAuth() {
+   const { user, session, roles, loading, signIn, signUp, signOut, hasRole } =
+      useAuthStore();
+
+   return {
+      user,
+      session,
+      roles,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      hasRole,
+      isLoggedIn: !!user,
+   };
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 }

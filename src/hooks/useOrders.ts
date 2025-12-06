@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+<<<<<<< HEAD
 import { authorizedAPI } from "@/lib/api";
 import handleApiRequest from "@/lib/handleApiRequest";
 import type {
@@ -77,6 +78,27 @@ function transformOrderList(data: any): any {
    
    return transformOrder(data);
 }
+=======
+import {
+   fetchUserOrders,
+   fetchAllOrders,
+   fetchOrderById,
+   createOrder,
+   updateOrderStatus,
+   requestRefundForItem,
+   cancelRefundRequestForItem,
+   requestRefundForOrder,
+   cancelRefundRequestForOrder,
+   respondToRefundRequest,
+   respondToOrderRefundRequest,
+   deleteOrder,
+   getOrderStats,
+   type Order,
+   type OrderQueryOptions,
+   type CreateOrderRequest,
+   type OrderStatus,
+} from "@/integrations/supabase/orders";
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
 // Query Keys
 export const orderKeys = {
@@ -90,6 +112,7 @@ export const orderKeys = {
    userOrders: (userId: string) => [...orderKeys.all, "user", userId] as const,
 };
 
+<<<<<<< HEAD
 // Internal API functions
 const orderAPI = {
    // Get user orders
@@ -267,46 +290,83 @@ export function useUserOrders(options: OrderQueryOptions = {}) {
    const { user, isLoggedIn } = useAuth();
 
    const key = orderKeys.userOrders(user?.id || "");
+=======
+// Hook for fetching user's orders
+export function useUserOrders(options: OrderQueryOptions = {}) {
+   const { user, isLoggedIn } = useAuth();
+
+   console.log("useUserOrders hook:", { user, isLoggedIn, options });
+
+   const key = orderKeys.userOrders(user?.id || "");
+
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
    const keyWithOptions = [...key, { ...(options || {}) }];
 
    return useQuery({
       queryKey: keyWithOptions,
+<<<<<<< HEAD
       queryFn: () => orderAPI.getUserOrders(options),
+=======
+      queryFn: () => fetchUserOrders(options, user?.id),
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       enabled: isLoggedIn && !!user,
       staleTime: 1000 * 60 * 5, // 5 minutes
    });
 }
 
+<<<<<<< HEAD
 /**
  * Hook for fetching all orders (admin only)
  */
+=======
+// Hook for fetching all orders (admin only)
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useAllOrders(options: OrderQueryOptions = {}) {
    const { user, hasRole } = useAuth();
 
    return useQuery({
       queryKey: orderKeys.list(options),
+<<<<<<< HEAD
       queryFn: () => orderAPI.getAllOrders(options),
+=======
+      queryFn: () => {
+         console.log("Executing fetchAllOrders with options:", options);
+         return fetchAllOrders(options);
+      },
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       enabled: !!user && hasRole("admin"),
       staleTime: 0, // Disable stale time to always refetch
    });
 }
 
+<<<<<<< HEAD
 /**
  * Hook for fetching single order
  */
+=======
+// Hook for fetching single order
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useOrder(id: string) {
    const { user, isLoggedIn } = useAuth();
 
    return useQuery({
       queryKey: orderKeys.detail(id),
+<<<<<<< HEAD
       queryFn: () => orderAPI.getOrderById(id),
+=======
+      queryFn: () => fetchOrderById(id),
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       enabled: isLoggedIn && !!user && !!id,
    });
 }
 
+<<<<<<< HEAD
 /**
  * Hook to fetch and cache the latest rider assignment for an order
  */
+=======
+// Hook to fetch and cache the latest rider assignment for an order
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useOrderAssignment(orderId?: string, enabled = true) {
    const { user, isLoggedIn } = useAuth();
 
@@ -314,24 +374,80 @@ export function useOrderAssignment(orderId?: string, enabled = true) {
       queryKey: ["orders", "assignment", orderId],
       queryFn: async () => {
          if (!orderId) return null as any;
+<<<<<<< HEAD
          // Get order which includes assignment info
          const order = await orderAPI.getOrderById(orderId);
          return order?.rider || null;
+=======
+         const res = await fetch(`/api/orders/${orderId}/assignment`);
+         if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(
+               body?.error || `Failed to fetch assignment for ${orderId}`
+            );
+         }
+         const json = await res.json();
+         return json?.rider || null;
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       },
       enabled: Boolean(orderId) && enabled && isLoggedIn && !!user,
       staleTime: 1000 * 60 * 5, // 5 minutes
    });
 }
 
+<<<<<<< HEAD
 /**
  * Hook for creating orders
  */
+=======
+// Hook for order statistics (admin only)
+export function useOrderStats() {
+   const { user, hasRole } = useAuth();
+
+   return useQuery({
+      queryKey: orderKeys.stats(),
+      queryFn: getOrderStats,
+      enabled: !!user && hasRole("admin"),
+      staleTime: 1000 * 60 * 5, // 5 minutes
+   });
+}
+
+// Hook for fetching refunded items (admin)
+export function useRefundedItems({
+   page = 1,
+   limit = 20,
+   refundStatus,
+}: { page?: number; limit?: number; refundStatus?: string } = {}) {
+   const { user, hasRole } = useAuth();
+
+   return useQuery({
+      queryKey: ["orders", "refunded", { page, limit, refundStatus }],
+      queryFn: async () => {
+         const q = new URLSearchParams();
+         q.set("page", String(page));
+         q.set("limit", String(limit));
+         if (refundStatus) q.set("refundStatus", refundStatus);
+         const res = await fetch(`/api/admin/refunds?${q.toString()}`);
+         if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body?.error || "Failed to fetch refunded items");
+         }
+         return res.json();
+      },
+      enabled: !!user && hasRole("admin"),
+      staleTime: 0,
+   });
+}
+
+// Hook for creating orders
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useCreateOrder() {
    const queryClient = useQueryClient();
    const { user } = useAuth();
 
    return useMutation<Order, Error, CreateOrderRequest>({
       mutationFn: async (orderData: CreateOrderRequest) => {
+<<<<<<< HEAD
          if (!orderData.order || !orderData.items) {
             throw new Error("Invalid order data structure");
          }
@@ -340,6 +456,59 @@ export function useCreateOrder() {
          return result;
       },
       onSuccess: (data) => {
+=======
+         console.log("Regular Order Mutation - Starting with data:", orderData);
+         console.log(
+            "Regular Order Mutation - calling integrations.createOrder..."
+         );
+         if (!orderData.order || !orderData.items) {
+            console.error("Invalid order data:", orderData);
+            throw new Error("Invalid order data structure");
+         }
+         try {
+            // Check if orders are enabled (server-side setting).
+            // This check is best-effort; transient failures should not block checkout.
+            // Orders can proceed with checkbox confirmation during non-working hours
+            // No delivery_time validation required
+
+            // Create the order via a server-side API so the insertion uses the
+            // service role (avoids RLS denial when invoked from the browser).
+            const resp = await fetch("/api/orders/create", {
+               method: "POST",
+               headers: { "Content-Type": "application/json" },
+               body: JSON.stringify(orderData),
+            });
+
+            if (!resp.ok) {
+               const body = await resp.json().catch(() => ({}));
+               const msg =
+                  body?.error || `Failed to create order: ${resp.status}`;
+               throw new Error(msg);
+            }
+
+            const result = await resp.json();
+            console.log(
+               "Regular Order Mutation - integrations.createOrder returned:",
+               result
+            );
+            if (!result) {
+               throw new Error("No response received from server");
+            }
+            console.log("Regular Order Mutation - Success:", result);
+            return result;
+         } catch (error) {
+            console.error("Regular Order Mutation - Error:", error);
+            throw error instanceof Error
+               ? error
+               : new Error("Unknown error occurred");
+         }
+      },
+      onMutate: (variables) => {
+         console.log("Regular Order Mutation - onMutate:", variables);
+      },
+      onSuccess: (data) => {
+         console.log("Regular Order Mutation - onSuccess:", data);
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
          if (data?.id) {
             queryClient.setQueryData(orderKeys.detail(data.id), data);
@@ -350,7 +519,10 @@ export function useCreateOrder() {
             });
          }
 
+<<<<<<< HEAD
          // Handle payment linking (if needed)
+=======
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          try {
             if (typeof window !== "undefined") {
                const ref = sessionStorage.getItem("kpay_reference");
@@ -368,13 +540,18 @@ export function useCreateOrder() {
                               }),
                            });
 
+<<<<<<< HEAD
                            if (resp.ok || resp.status === 409) {
+=======
+                           if (resp.ok) {
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                               try {
                                  sessionStorage.removeItem("kpay_reference");
                               } catch (e) {}
                               break;
                            }
 
+<<<<<<< HEAD
                            if (attempt < maxAttempts) {
                               await new Promise((r) =>
                                  setTimeout(r, 500 * attempt)
@@ -383,6 +560,32 @@ export function useCreateOrder() {
                         } catch (e) {
                            console.warn("Auto-link payment attempt failed:", e);
                         }
+=======
+                           // If the response is a 409 (already linked) treat as success
+                           if (resp.status === 409) {
+                              try {
+                                 sessionStorage.removeItem("kpay_reference");
+                              } catch (e) {}
+                              break;
+                           }
+
+                           // Non-OK responses will retry unless last attempt
+                           const body = await resp.json().catch(() => ({}));
+                           console.warn("Auto-link attempt failed:", {
+                              attempt,
+                              body,
+                           });
+                        } catch (e) {
+                           console.warn("Auto-link payment attempt failed:", e);
+                        }
+
+                        if (attempt < maxAttempts) {
+                           // backoff
+                           await new Promise((r) =>
+                              setTimeout(r, 500 * attempt)
+                           );
+                        }
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                      }
                   })();
                }
@@ -390,6 +593,7 @@ export function useCreateOrder() {
          } catch (e) {}
       },
       onError: (error: Error) => {
+<<<<<<< HEAD
          toast.error(error.message || "Failed to create order");
       },
    });
@@ -398,6 +602,22 @@ export function useCreateOrder() {
 /**
  * Hook for updating order status
  */
+=======
+         console.error("Regular Order Mutation - onError:", error);
+         toast.error(error.message || "Failed to create order");
+      },
+      onSettled: (data, error, variables) => {
+         console.log("Regular Order Mutation - onSettled:", {
+            data,
+            error,
+            variables,
+         });
+      },
+   });
+}
+
+// Hook for updating order status
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useUpdateOrderStatus() {
    const queryClient = useQueryClient();
    return useMutation({
@@ -410,9 +630,26 @@ export function useUpdateOrderStatus() {
          status: OrderStatus;
          additionalFields?: Partial<Order>;
       }) => {
+<<<<<<< HEAD
          const updated = await orderAPI.updateOrderStatus(id, status);
          // Merge additional fields if provided
          return { ...updated, ...(additionalFields || {}) } as Order;
+=======
+         // Call server API which uses service role key to perform status change
+         const res = await fetch("/api/orders/update-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, status, additionalFields }),
+         });
+         if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(
+               body?.error || `Failed to update status: ${res.status}`
+            );
+         }
+         const updated = await res.json();
+         return updated as Order;
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       },
       onMutate: async ({ id, status, additionalFields }) => {
          await queryClient.cancelQueries({ queryKey: orderKeys.all });
@@ -423,6 +660,10 @@ export function useUpdateOrderStatus() {
             try {
                if (!data) continue;
 
+<<<<<<< HEAD
+=======
+               // If this is a single order detail
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                const asOrder = data as any;
                if (asOrder && asOrder.id === id) {
                   const updated = {
@@ -434,6 +675,10 @@ export function useUpdateOrderStatus() {
                   continue;
                }
 
+<<<<<<< HEAD
+=======
+               // If this is a paginated list with `.data` array
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                if (asOrder && Array.isArray(asOrder.data)) {
                   const updatedList = { ...asOrder } as any;
                   updatedList.data = asOrder.data.map((o: any) =>
@@ -449,16 +694,30 @@ export function useUpdateOrderStatus() {
          return { previousQueries };
       },
       onSuccess: (updatedOrder) => {
+<<<<<<< HEAD
+=======
+         // Update the specific order in cache with server response
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          try {
             queryClient.setQueryData(
                orderKeys.detail(updatedOrder.id),
                updatedOrder
             );
          } catch (e) {}
+<<<<<<< HEAD
          queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
          queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
       },
       onError: (error, variables, context: any) => {
+=======
+         // Invalidate order lists to refetch authoritative data
+         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+         // Invalidate stats
+         queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+      },
+      onError: (error, variables, context: any) => {
+         // rollback optimistic updates using the captured previousQueries
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          if (context?.previousQueries) {
             for (const [key, data] of context.previousQueries) {
                try {
@@ -469,6 +728,10 @@ export function useUpdateOrderStatus() {
          console.error("Failed to update order status:", error);
       },
       onSettled: (data) => {
+<<<<<<< HEAD
+=======
+         // Ensure lists and details are refreshed
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          try {
             queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
             queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
@@ -482,19 +745,28 @@ export function useUpdateOrderStatus() {
    });
 }
 
+<<<<<<< HEAD
 /**
  * Hook for requesting refund for an order item
  */
+=======
+// Hook for rejecting an order item
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useRejectOrderItem() {
    const queryClient = useQueryClient();
    return useMutation({
       mutationFn: ({
          orderItemId,
          reason,
+<<<<<<< HEAD
+=======
+         adminInitiated,
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       }: {
          orderItemId: string;
          reason: string;
          adminInitiated?: boolean;
+<<<<<<< HEAD
       }) => orderAPI.requestItemRefund(orderItemId, reason),
       onSuccess: () => {
          toast.success("Refund requested");
@@ -510,10 +782,120 @@ export function useRejectOrderItem() {
 /**
  * Hook for canceling item refund request
  */
+=======
+      }) => requestRefundForItem(orderItemId, reason, Boolean(adminInitiated)),
+      onMutate: async ({
+         orderItemId,
+         reason,
+      }: {
+         orderItemId: string;
+         reason: string;
+      }) => {
+         await queryClient.cancelQueries({ queryKey: orderKeys.details() });
+         await queryClient.cancelQueries({ queryKey: orderKeys.lists() });
+
+         const previousDetails = queryClient.getQueriesData({
+            queryKey: orderKeys.details(),
+         });
+         const previousLists = queryClient.getQueriesData({
+            queryKey: orderKeys.lists(),
+         });
+
+         // Optimistically mark item as refund_requested/requested
+         for (const [key, data] of previousDetails) {
+            try {
+               const order = data as any;
+               if (order && Array.isArray(order.items)) {
+                  const idx = order.items.findIndex(
+                     (it: any) => it.id === orderItemId
+                  );
+                  if (idx !== -1) {
+                     const updated = { ...order };
+                     updated.items = [...order.items];
+                     updated.items[idx] = {
+                        ...updated.items[idx],
+                        refund_requested: true,
+                        refund_reason: reason,
+                        refund_status: "requested",
+                        refund_requested_at: new Date().toISOString(),
+                     };
+                     queryClient.setQueryData(key, updated);
+                  }
+               }
+            } catch (e) {}
+         }
+
+         for (const [key, data] of previousLists) {
+            try {
+               const list = data as any;
+               if (list && Array.isArray(list.data)) {
+                  const updatedList = { ...list };
+                  updatedList.data = list.data.map((order: any) => {
+                     if (!order.items) return order;
+                     const itemIdx = order.items.findIndex(
+                        (it: any) => it.id === orderItemId
+                     );
+                     if (itemIdx === -1) return order;
+                     const updatedOrder = { ...order };
+                     updatedOrder.items = [...order.items];
+                     updatedOrder.items[itemIdx] = {
+                        ...updatedOrder.items[itemIdx],
+                        refund_requested: true,
+                        refund_reason: reason,
+                        refund_status: "requested",
+                        refund_requested_at: new Date().toISOString(),
+                     };
+                     return updatedOrder;
+                  });
+                  queryClient.setQueryData(key, updatedList);
+               }
+            } catch (e) {}
+         }
+
+         return { previousDetails, previousLists };
+      },
+      onError: (err, variables, context: any) => {
+         // rollback
+         if (context?.previousDetails) {
+            for (const [key, data] of context.previousDetails) {
+               try {
+                  queryClient.setQueryData(key, data);
+               } catch (e) {}
+            }
+         }
+         if (context?.previousLists) {
+            for (const [key, data] of context.previousLists) {
+               try {
+                  queryClient.setQueryData(key, data);
+               } catch (e) {}
+            }
+         }
+         const message = err?.message || "Failed to request refund";
+         toast.error(message);
+      },
+      onSettled: (data: any) => {
+         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+         if (data?.order_id) {
+            queryClient.invalidateQueries({
+               queryKey: orderKeys.detail(data.order_id),
+            });
+         } else {
+            queryClient.invalidateQueries({ queryKey: orderKeys.details() });
+         }
+      },
+      onSuccess: () => {
+         toast.success("Refund requested");
+      },
+   });
+}
+
+// Hook for un-rejecting an order item (undo rejection)
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useUnrejectOrderItem() {
    const queryClient = useQueryClient();
    return useMutation({
       mutationFn: (orderItemId: string) =>
+<<<<<<< HEAD
          orderAPI.cancelItemRefundRequest(orderItemId),
       onSuccess: () => {
          toast.success("Refund request cancelled");
@@ -546,6 +928,128 @@ export function useRefundedItems({
 /**
  * Main hook that provides all order-related functionality
  */
+=======
+         cancelRefundRequestForItem(orderItemId),
+      onMutate: async (orderItemId: string) => {
+         await queryClient.cancelQueries({ queryKey: orderKeys.details() });
+         await queryClient.cancelQueries({ queryKey: orderKeys.lists() });
+
+         const previousDetails = queryClient.getQueriesData({
+            queryKey: orderKeys.details(),
+         });
+         const previousLists = queryClient.getQueriesData({
+            queryKey: orderKeys.lists(),
+         });
+
+         for (const [key, data] of previousDetails) {
+            try {
+               const order = data as any;
+               if (order && Array.isArray(order.items)) {
+                  const idx = order.items.findIndex(
+                     (it: any) => it.id === orderItemId
+                  );
+                  if (idx !== -1) {
+                     const updated = { ...order };
+                     updated.items = [...order.items];
+                     updated.items[idx] = {
+                        ...updated.items[idx],
+                        refund_requested: false,
+                        refund_reason: null,
+                        refund_status: "cancelled",
+                        refund_requested_at: null,
+                     };
+                     queryClient.setQueryData(key, updated);
+                  }
+               }
+            } catch (e) {}
+         }
+
+         for (const [key, data] of previousLists) {
+            try {
+               const list = data as any;
+               if (list && Array.isArray(list.data)) {
+                  const updatedList = { ...list };
+                  updatedList.data = list.data.map((order: any) => {
+                     if (!order.items) return order;
+                     const itemIdx = order.items.findIndex(
+                        (it: any) => it.id === orderItemId
+                     );
+                     if (itemIdx === -1) return order;
+                     const updatedOrder = { ...order };
+                     updatedOrder.items = [...order.items];
+                     updatedOrder.items[itemIdx] = {
+                        ...updatedOrder.items[itemIdx],
+                        refund_requested: false,
+                        refund_reason: null,
+                        refund_status: "cancelled",
+                        refund_requested_at: null,
+                     };
+                     return updatedOrder;
+                  });
+                  queryClient.setQueryData(key, updatedList);
+               }
+            } catch (e) {}
+         }
+
+         return { previousDetails, previousLists };
+      },
+      onError: (err, variables, context: any) => {
+         if (context?.previousDetails) {
+            for (const [key, data] of context.previousDetails) {
+               try {
+                  queryClient.setQueryData(key, data);
+               } catch (e) {}
+            }
+         }
+         if (context?.previousLists) {
+            for (const [key, data] of context.previousLists) {
+               try {
+                  queryClient.setQueryData(key, data);
+               } catch (e) {}
+            }
+         }
+         toast.error("Failed to cancel refund request");
+      },
+      onSettled: (data: any) => {
+         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+         if (data?.order_id) {
+            queryClient.invalidateQueries({
+               queryKey: orderKeys.detail(data.order_id),
+            });
+         } else {
+            queryClient.invalidateQueries({ queryKey: orderKeys.details() });
+         }
+      },
+      onSuccess: () => {
+         toast.success("Refund request cancelled");
+      },
+   });
+}
+
+// Hook for deleting orders (admin only)
+export function useDeleteOrder() {
+   const queryClient = useQueryClient();
+
+   return useMutation({
+      mutationFn: (id: string) => deleteOrder(id),
+      onSuccess: (_, deletedId) => {
+         // Remove from cache
+         queryClient.removeQueries({ queryKey: orderKeys.detail(deletedId) });
+
+         // Invalidate lists
+         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+
+         // Invalidate stats
+         queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+      },
+      onError: (error) => {
+         console.error("Failed to delete order:", error);
+      },
+   });
+}
+
+// Main hook that provides all order-related functionality
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 export function useOrders() {
    const { user, isLoggedIn, hasRole } = useAuth();
    const queryClient = useQueryClient();
@@ -559,6 +1063,7 @@ export function useOrders() {
       useAllOrders: (options?: OrderQueryOptions) =>
          useAllOrders(options || {}),
       useOrder: (id: string) => useOrder(id),
+<<<<<<< HEAD
       useOrderStats: () => {
          // TODO: Implement stats endpoint if needed
          return useQuery({
@@ -571,6 +1076,9 @@ export function useOrders() {
             staleTime: 1000 * 60 * 5,
          });
       },
+=======
+      useOrderStats: () => useOrderStats(),
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       useRequestRefundItem: () => useRejectOrderItem(),
       useCancelRefundRequestItem: () => useUnrejectOrderItem(),
       useRespondRefundRequest: () =>
@@ -578,32 +1086,227 @@ export function useOrders() {
             mutationFn: ({
                itemId,
                approve,
+<<<<<<< HEAD
+=======
+               note,
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
             }: {
                itemId: string;
                approve: boolean;
                note?: string;
+<<<<<<< HEAD
             }) => orderAPI.respondToItemRefund(itemId, approve),
             onSuccess: () => {
                queryClient.invalidateQueries({ queryKey: orderKeys.all });
                toast.success("Refund response processed");
+=======
+            }) => respondToRefundRequest(itemId, approve, note),
+            onSuccess: (updatedItem) => {
+               // Try to merge the updated item row into any cached orders so UI updates immediately
+               try {
+                  const item = updatedItem as any;
+                  const updatedItemId = item?.id;
+                  const parentOrderId = item?.order_id;
+
+                  // Update any cached order detail queries
+                  const details = queryClient.getQueriesData({
+                     queryKey: orderKeys.details(),
+                  });
+                  for (const [key, data] of details) {
+                     try {
+                        const order = data as any;
+                        if (!order || !Array.isArray(order.items)) continue;
+                        const idx = order.items.findIndex(
+                           (it: any) => it.id === updatedItemId
+                        );
+                        if (idx !== -1) {
+                           const updated = { ...order };
+                           updated.items = [...order.items];
+                           updated.items[idx] = {
+                              ...updated.items[idx],
+                              ...item,
+                           };
+                           queryClient.setQueryData(key, updated);
+                        }
+                     } catch (e) {}
+                  }
+
+                  // Update paginated lists
+                  const lists = queryClient.getQueriesData({
+                     queryKey: orderKeys.lists(),
+                  });
+                  for (const [key, data] of lists) {
+                     try {
+                        const list = data as any;
+                        if (!list || !Array.isArray(list.data)) continue;
+                        const updatedList = { ...list };
+                        updatedList.data = list.data.map((order: any) => {
+                           if (!order.items) return order;
+                           const itemIdx = order.items.findIndex(
+                              (it: any) => it.id === updatedItemId
+                           );
+                           if (itemIdx === -1) return order;
+                           const updatedOrder = { ...order };
+                           updatedOrder.items = [...order.items];
+                           updatedOrder.items[itemIdx] = {
+                              ...updatedOrder.items[itemIdx],
+                              ...item,
+                           };
+                           return updatedOrder;
+                        });
+                        queryClient.setQueryData(key, updatedList);
+                     } catch (e) {}
+                  }
+
+                  // Also update the specific order detail key if present
+                  if (parentOrderId) {
+                     const existing = queryClient.getQueryData(
+                        orderKeys.detail(parentOrderId)
+                     );
+                     if (existing) {
+                        const order = existing as any;
+                        if (Array.isArray(order.items)) {
+                           const idx = order.items.findIndex(
+                              (it: any) => it.id === updatedItemId
+                           );
+                           if (idx !== -1) {
+                              const updated = { ...order };
+                              updated.items = [...order.items];
+                              updated.items[idx] = {
+                                 ...updated.items[idx],
+                                 ...item,
+                              };
+                              queryClient.setQueryData(
+                                 orderKeys.detail(parentOrderId),
+                                 updated
+                              );
+                           }
+                        }
+                     }
+                  }
+               } catch (e) {
+                  // fallback to invalidation
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.lists(),
+                  });
+               }
+
+               queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+               try {
+                  if (
+                     (updatedItem as any)?.refund_status === "rejected" &&
+                     (updatedItem as any)?._mode === "reject"
+                  ) {
+                     toast.success("Reject response processed");
+                  } else {
+                     toast.success("Refund response processed");
+                  }
+               } catch (e) {
+                  toast.success("Refund response processed");
+               }
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
             },
             onError: (err) => {
                console.error("Failed to respond to refund:", err);
                toast.error(err?.message || "Failed to process refund response");
             },
          }),
+<<<<<<< HEAD
+=======
+      // Admin respond to full-order refunds
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       useRespondOrderRefund: () =>
          useMutation({
             mutationFn: ({
                orderId,
                approve,
+<<<<<<< HEAD
+=======
+               note,
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
             }: {
                orderId: string;
                approve: boolean;
                note?: string;
+<<<<<<< HEAD
             }) => orderAPI.respondToOrderRefund(orderId, approve),
             onSuccess: () => {
                queryClient.invalidateQueries({ queryKey: orderKeys.all });
+=======
+            }) => respondToOrderRefundRequest(orderId, approve, note),
+            onSuccess: (updatedOrder) => {
+               try {
+                  const order = updatedOrder as any;
+                  const id = order?.id;
+
+                  // Merge into order detail cache
+                  const existing = queryClient.getQueryData(
+                     orderKeys.detail(id)
+                  );
+                  if (existing) {
+                     const merged = { ...(existing as any), ...order } as any;
+                     if (
+                        order?.refund_status === "approved" &&
+                        Array.isArray(merged.items)
+                     ) {
+                        merged.items = merged.items.map((it: any) => ({
+                           ...it,
+                           refund_status:
+                              it.refund_status === "requested"
+                                 ? "approved"
+                                 : it.refund_status,
+                        }));
+                        // When a full-order refund is approved, ensure order status reflects refunded
+                        merged.status =
+                           merged.status === "delivered"
+                              ? "refunded"
+                              : merged.status;
+                     }
+                     queryClient.setQueryData(orderKeys.detail(id), merged);
+                  }
+
+                  // Merge into list pages
+                  const lists = queryClient.getQueriesData({
+                     queryKey: orderKeys.lists(),
+                  });
+                  for (const [key, data] of lists) {
+                     try {
+                        const list = data as any;
+                        if (!list || !Array.isArray(list.data)) continue;
+                        const updatedList = { ...list };
+                        updatedList.data = list.data.map((o: any) => {
+                           if (o.id !== id) return o;
+                           const merged = { ...o, ...order } as any;
+                           if (
+                              order?.refund_status === "approved" &&
+                              Array.isArray(merged.items)
+                           ) {
+                              merged.items = merged.items.map((it: any) => ({
+                                 ...it,
+                                 refund_status:
+                                    it.refund_status === "requested"
+                                       ? "approved"
+                                       : it.refund_status,
+                              }));
+                              // Ensure list items reflect overall refunded status
+                              merged.status =
+                                 merged.status === "delivered"
+                                    ? "refunded"
+                                    : merged.status;
+                           }
+                           return merged;
+                        });
+                        queryClient.setQueryData(key, updatedList);
+                     } catch (e) {}
+                  }
+               } catch (e) {
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.lists(),
+                  });
+               }
+
+               queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                toast.success("Order refund response processed");
             },
             onError: (err) => {
@@ -613,25 +1316,112 @@ export function useOrders() {
                );
             },
          }),
+<<<<<<< HEAD
+=======
+
+      // Hook to request full-order refund
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       useRequestRefundOrder: () =>
          useMutation({
             mutationFn: ({
                orderId,
                reason,
+<<<<<<< HEAD
+=======
+               adminInitiated,
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
             }: {
                orderId: string;
                reason: string;
                adminInitiated?: boolean;
+<<<<<<< HEAD
             }) => orderAPI.requestOrderRefund(orderId, reason),
             onSuccess: () => {
                queryClient.invalidateQueries({ queryKey: orderKeys.all });
                toast.success("Full-order refund requested");
             },
             onError: (err) => {
+=======
+            }) =>
+               requestRefundForOrder(orderId, reason, Boolean(adminInitiated)),
+            onMutate: async ({
+               orderId,
+               reason,
+            }: {
+               orderId: string;
+               reason: string;
+            }) => {
+               await queryClient.cancelQueries({
+                  queryKey: orderKeys.details(),
+               });
+               await queryClient.cancelQueries({ queryKey: orderKeys.lists() });
+
+               const previousDetails = queryClient.getQueriesData({
+                  queryKey: orderKeys.details(),
+               });
+               const previousLists = queryClient.getQueriesData({
+                  queryKey: orderKeys.lists(),
+               });
+
+               for (const [key, data] of previousDetails) {
+                  try {
+                     const order = data as any;
+                     if (order && order.id === orderId) {
+                        const updated = {
+                           ...order,
+                           refund_requested: true,
+                           refund_reason: reason,
+                           refund_status: "requested",
+                           refund_requested_at: new Date().toISOString(),
+                        };
+                        queryClient.setQueryData(key, updated);
+                     }
+                  } catch (e) {}
+               }
+
+               for (const [key, data] of previousLists) {
+                  try {
+                     const list = data as any;
+                     if (list && Array.isArray(list.data)) {
+                        const updatedList = { ...list };
+                        updatedList.data = list.data.map((order: any) => {
+                           if (order.id !== orderId) return order;
+                           return {
+                              ...order,
+                              refund_requested: true,
+                              refund_reason: reason,
+                              refund_status: "requested",
+                              refund_requested_at: new Date().toISOString(),
+                           };
+                        });
+                        queryClient.setQueryData(key, updatedList);
+                     }
+                  } catch (e) {}
+               }
+
+               return { previousDetails, previousLists };
+            },
+            onError: (err, vars, context: any) => {
+               if (context?.previousDetails) {
+                  for (const [key, data] of context.previousDetails) {
+                     try {
+                        queryClient.setQueryData(key, data);
+                     } catch (e) {}
+                  }
+               }
+               if (context?.previousLists) {
+                  for (const [key, data] of context.previousLists) {
+                     try {
+                        queryClient.setQueryData(key, data);
+                     } catch (e) {}
+                  }
+               }
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                toast.error(
                   err?.message || "Failed to request full-order refund"
                );
             },
+<<<<<<< HEAD
          }),
       useCancelRefundRequestOrder: () =>
          useMutation({
@@ -656,16 +1446,135 @@ export function useOrders() {
             },
          });
       },
+=======
+            onSettled: (data: any) => {
+               queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+               if (data?.id) {
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.detail(data.id),
+                  });
+               } else {
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.details(),
+                  });
+               }
+            },
+            onSuccess: () => {
+               toast.success("Full-order refund requested");
+            },
+         }),
+
+      // Hook to cancel full-order refund
+      useCancelRefundRequestOrder: () =>
+         useMutation({
+            mutationFn: (orderId: string) =>
+               cancelRefundRequestForOrder(orderId),
+            onMutate: async (orderId: string) => {
+               await queryClient.cancelQueries({
+                  queryKey: orderKeys.details(),
+               });
+               await queryClient.cancelQueries({ queryKey: orderKeys.lists() });
+
+               const previousDetails = queryClient.getQueriesData({
+                  queryKey: orderKeys.details(),
+               });
+               const previousLists = queryClient.getQueriesData({
+                  queryKey: orderKeys.lists(),
+               });
+
+               for (const [key, data] of previousDetails) {
+                  try {
+                     const order = data as any;
+                     if (order && order.id === orderId) {
+                        const updated = {
+                           ...order,
+                           refund_requested: false,
+                           refund_reason: null,
+                           refund_status: "cancelled",
+                           refund_requested_at: null,
+                        };
+                        queryClient.setQueryData(key, updated);
+                     }
+                  } catch (e) {}
+               }
+
+               for (const [key, data] of previousLists) {
+                  try {
+                     const list = data as any;
+                     if (list && Array.isArray(list.data)) {
+                        const updatedList = { ...list };
+                        updatedList.data = list.data.map((order: any) => {
+                           if (order.id !== orderId) return order;
+                           return {
+                              ...order,
+                              refund_requested: false,
+                              refund_reason: null,
+                              refund_status: "cancelled",
+                              refund_requested_at: null,
+                           };
+                        });
+                        queryClient.setQueryData(key, updatedList);
+                     }
+                  } catch (e) {}
+               }
+
+               return { previousDetails, previousLists };
+            },
+            onError: (err, vars, context: any) => {
+               if (context?.previousDetails) {
+                  for (const [key, data] of context.previousDetails) {
+                     try {
+                        queryClient.setQueryData(key, data);
+                     } catch (e) {}
+                  }
+               }
+               if (context?.previousLists) {
+                  for (const [key, data] of context.previousLists) {
+                     try {
+                        queryClient.setQueryData(key, data);
+                     } catch (e) {}
+                  }
+               }
+               toast.error("Failed to cancel full-order refund request");
+            },
+            onSettled: (data: any) => {
+               queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+               if (data?.id) {
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.detail(data.id),
+                  });
+               } else {
+                  queryClient.invalidateQueries({
+                     queryKey: orderKeys.details(),
+                  });
+               }
+            },
+            onSuccess: () => {
+               toast.success("Full-order refund cancelled");
+            },
+         }),
+
+      // Mutation hooks
+      createOrder: useCreateOrder(),
+      updateOrderStatus: useUpdateOrderStatus(),
+      deleteOrder: useDeleteOrder(),
+
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       // Utility functions
       invalidateOrders: () => {
          queryClient.invalidateQueries({ queryKey: orderKeys.all });
       },
+<<<<<<< HEAD
+=======
+
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       // Refunds
       useRefundedItems: (opts?: {
          page?: number;
          limit?: number;
          refundStatus?: string;
       }) => useRefundedItems(opts || {}),
+<<<<<<< HEAD
       useOrderAssignment: (orderId?: string, enabled = true) =>
          useOrderAssignment(orderId, enabled),
       prefetchOrder: (id: string) => {
@@ -675,6 +1584,20 @@ export function useOrders() {
             staleTime: 1000 * 60 * 5,
          });
       },
+=======
+      // Expose assignment hook so components can cache/reuse rider lookups
+      useOrderAssignment: (orderId?: string, enabled = true) =>
+         useOrderAssignment(orderId, enabled),
+
+      prefetchOrder: (id: string) => {
+         return queryClient.prefetchQuery({
+            queryKey: orderKeys.detail(id),
+            queryFn: () => fetchOrderById(id),
+            staleTime: 1000 * 60 * 5,
+         });
+      },
+
+>>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       // User state
       user,
       isLoggedIn,
