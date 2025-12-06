@@ -20,11 +20,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthStore } from "@/store/auth.store";
 import { supabase } from "@/integrations/supabase/client";
 
 const NewRiderPage = () => {
    const router = useRouter();
    const { session } = useAuth();
+   const { token } = useAuthStore();
    const [email, setEmail] = useState("");
    const [password, setPassword] = useState("");
    const [fullName, setFullName] = useState("");
@@ -126,15 +128,15 @@ const NewRiderPage = () => {
                   reader.readAsDataURL(imageFile);
                });
 
-               const token = session?.access_token;
-               if (token) {
+               const authToken = token;
+               if (authToken) {
                   const uploadRes = await fetch(
                      "/api/admin/upload-rider-image",
                      {
                         method: "POST",
                         headers: {
                            "Content-Type": "application/json",
-                           Authorization: `Bearer ${token}`,
+                           Authorization: `Bearer ${authToken}`,
                         },
                         body: JSON.stringify({
                            filename: imageFile.name,

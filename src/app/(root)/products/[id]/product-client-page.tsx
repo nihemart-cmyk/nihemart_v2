@@ -470,7 +470,7 @@ export default function ProductClientPage({
               <div className="flex-1">
                 {/* <div className="flex items-baseline gap-2"><span className="text-3xl font-bold text-orange-600">{currentPrice.toFixed(2)} frw</span>{comparePrice && <span className="text-lg text-gray-500 line-through">€{comparePrice.toFixed(2)}</span>}</div> */}
                 <div className="flex items-baseline gap-2 md:hidden">
-                  {!singleSelectedVariation && priceRange ? (
+                  {!singleSelectedVariation && priceRange && priceRange.min != null && priceRange.max != null ? (
                     <>
                       <span className="text-3xl font-bold text-orange-600">
                         {priceRange.min === priceRange.max
@@ -510,7 +510,7 @@ export default function ProductClientPage({
             <div className="space-y-2">
               {/* <div className="flex items-baseline gap-2"><span className="text-3xl font-bold text-orange-600">{currentPrice.toFixed(2)} frw</span>{comparePrice && <span className="text-lg text-gray-500 line-through">€{comparePrice.toFixed(2)}</span>}</div> */}
               <div className="md:flex items-baseline gap-2 hidden">
-                {!singleSelectedVariation && priceRange ? (
+                {!singleSelectedVariation && priceRange && priceRange.min != null && priceRange.max != null ? (
                   <>
                     <span className="text-3xl font-bold text-orange-600">
                       {priceRange.min === priceRange.max

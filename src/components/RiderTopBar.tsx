@@ -59,8 +59,8 @@ const RiderTopBar: FC<TopBarProps> = (props) => {
 
    // Get user initials for avatar
    const getUserInitials = () => {
-      const name = rider?.full_name || user?.email || "R";
-      if (rider?.full_name) {
+      const name = rider?.fullName || user?.email || "R";
+      if (rider?.fullName) {
          return name
             .split(" ")
             .map((n: string) => n[0])
@@ -72,7 +72,7 @@ const RiderTopBar: FC<TopBarProps> = (props) => {
    };
 
    const getUserDisplayName = () => {
-      return rider?.full_name || user?.email?.split("@")[0] || "Rider";
+      return rider?.fullName || user?.email?.split("@")[0] || "Rider";
    };
 
    return (

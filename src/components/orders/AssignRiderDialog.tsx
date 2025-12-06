@@ -182,7 +182,7 @@ export function AssignRiderDialog({
                                        key={r.id}
                                        value={r.id}
                                     >
-                                       {r.full_name || r.id}
+                                       {r.fullName || r.id}
                                        {r.phone ? ` — ${r.phone}` : ""}
                                     </SelectItem>
                                  ))

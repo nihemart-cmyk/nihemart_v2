@@ -469,7 +469,7 @@ const Dashboard = () => {
       return `${String(h).padStart(2, "0")}:00`;
    })();
 
-   const averageRating = rider?.average_rating || rider?.rating || "4.8";
+   const averageRating = "4.8";
 
    if (!isLoggedIn || loadingRider) {
       return (
@@ -525,7 +525,7 @@ const Dashboard = () => {
                   <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
                      {t("rider.welcomeBack").replace(
                         "{name}",
-                        rider?.full_name || user?.email || "Rider"
+                        rider?.fullName || user?.email || "Rider"
                      )}
                   </h1>
                   <p className="text-sm sm:text-base text-gray-600">
@@ -579,9 +579,9 @@ const Dashboard = () => {
                   <div className="lg:col-span-1">
                      <ActiveRiderCard
                         id={rider?.id || "-"}
-                        name={rider?.full_name || user?.email || "Rider"}
-                        location={rider?.location || rider?.city || "-"}
-                        imageUrl={rider?.image_url || rider?.avatar || ""}
+                        name={rider?.fullName || user?.email || "Rider"}
+                        location={rider?.location || "-"}
+                        imageUrl={rider?.imageUrl || ""}
                         deliveries={`${totalDeliveries}`}
                         rating={"4.8"}
                         status={rider?.active ? "Active" : "Unavailable"}

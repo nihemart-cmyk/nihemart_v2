@@ -9,6 +9,7 @@ import { Download, Search, Filter, Loader2, Package, Bell, Clock, Calendar } fro
 import Link from "next/link"
 import { DataTable } from "@/components/orders/data-table"
 import { useOrders } from '@/hooks/useOrders'
+import { type Order } from '@/types/orders'
 import { columns } from "@/components/orders/columns"
 import {
   Pagination,
@@ -61,13 +62,13 @@ const AdminNewOrdersPage: React.FC = () => {
   }
 
   // Calculate stats for new orders
-  const todayOrders = orders.filter(order => {
+  const todayOrders = orders.filter((order: Order) => {
     const orderDate = new Date(order.created_at)
     const today = new Date()
     return orderDate.toDateString() === today.toDateString()
   }).length
 
-  const totalValue = orders.reduce((sum, order) => sum + order.total, 0)
+  const totalValue = orders.reduce((sum: number, order: Order) => sum + order.total, 0)
 
   if (isError) {
     return (

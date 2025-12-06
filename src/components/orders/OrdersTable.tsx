@@ -168,7 +168,7 @@ const OrdersTable: FC<OrdersTableProps> = () => {
       unpaginated_totalCount: allOrdersUnpaginated?.count,
       statsDataSummary: statsData,
       loadedOrdersLength: orders.length,
-      sampleOrderIds: orders.slice(0, 10).map((o) => o.id),
+      sampleOrderIds: orders.slice(0, 10).map((o: Order) => o.id),
    });
 
    // Fetch orders_enabled to show banner in admin list
@@ -493,7 +493,7 @@ const OrdersTable: FC<OrdersTableProps> = () => {
 
                         // Fallback to counting from loaded orders if stats didn't yield a number
                         if (!count) {
-                           count = orders.filter((order) => {
+                           count = orders.filter((order: Order) => {
                               const expectedStatus = statusMapping[label];
                               return order.status === expectedStatus;
                            }).length;
@@ -659,22 +659,25 @@ const OrdersTable: FC<OrdersTableProps> = () => {
                               </SelectTrigger>
                               <SelectContent>
                                  <SelectItem value="all">All Cities</SelectItem>
-                                 {[
-                                    ...new Set(
-                                       orders
-                                          .map((order) => order.delivery_city)
-                                          .filter((city): city is string =>
-                                             Boolean(city)
-                                          )
-                                    ),
-                                 ].map((city) => (
-                                    <SelectItem
-                                       key={city}
-                                       value={city}
-                                    >
-                                       {city}
-                                    </SelectItem>
-                                 ))}
+                                 {(() => {
+                                    const cities: string[] = Array.from(
+                                       new Set(
+                                          orders
+                                             .map((order: Order) => order.delivery_city)
+                                             .filter((city: string | null | undefined): city is string =>
+                                                Boolean(city)
+                                             )
+                                       )
+                                    );
+                                    return cities.map((city: string) => (
+                                       <SelectItem
+                                          key={city}
+                                          value={city}
+                                       >
+                                          {city}
+                                       </SelectItem>
+                                    ));
+                                 })()}
                               </SelectContent>
                            </Select>
                         </div>

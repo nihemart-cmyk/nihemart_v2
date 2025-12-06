@@ -16,15 +16,9 @@ import { Input } from "@/components/ui/input";
 import { Mail } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-<<<<<<< HEAD
 import { z } from "zod";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useForgotPassword } from "@/hooks/useAuth";
-=======
-import { supabase } from "@/integrations/supabase/client";
-import { z } from "zod";
-import { useLanguage } from "@/contexts/LanguageContext";
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
 const ForgotSchema = z.object({
    email: z.string().email(),
@@ -39,7 +33,6 @@ const ForgotPasswordForm: FC = () => {
    });
 
    const { t } = useLanguage();
-<<<<<<< HEAD
    const { mutateAsync: forgotPassword, isPending } = useForgotPassword();
 
    const onSubmit = async (data: TForgot) => {
@@ -56,40 +49,6 @@ const ForgotPasswordForm: FC = () => {
             error?.error || 
             "Failed to send reset email. Please try again."
          );
-=======
-
-   const onSubmit = async (data: TForgot) => {
-      try {
-         // Use server API to create a Supabase action link and send email via SMTP
-         const res = await fetch("/api/email/send", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: data.email, type: "recovery" }),
-         });
-
-         const json = await res.json().catch(() => null);
-         if (!res.ok) {
-            console.error("email send error", json);
-            toast.error((json && json.error) || "Failed to send reset email");
-            return;
-         }
-
-         // API may return { ok: false, warning: 'SMTP not configured' } while still
-         // generating an action link. Treat as success but surface the warning.
-         if (json && json.warning) {
-            toast.success(t("auth.resetEmailRequested"));
-            // keep the form cleared so user knows the request was sent
-            form.reset();
-            return;
-         }
-
-         // Normal success
-         toast.success(t("auth.resetEmailSent"));
-         form.reset();
-      } catch (err) {
-         console.error(err);
-         toast.error("An unexpected error occurred");
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       }
    };
 
@@ -127,15 +86,9 @@ const ForgotPasswordForm: FC = () => {
                   type="submit"
                   className="w-full bg-brand-orange hover:bg-brand-orange/90 text-white"
                   size="lg"
-<<<<<<< HEAD
                   disabled={isPending || form.formState.isSubmitting}
                >
                   {isPending || form.formState.isSubmitting
-=======
-                  disabled={form.formState.isSubmitting}
-               >
-                  {form.formState.isSubmitting
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
                      ? t("auth.sending")
                      : t("auth.sendResetEmail")}
                </Button>

@@ -23,12 +23,7 @@ import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff, Loader } from "lucide-react";
 import { toast } from "sonner";
 import { redirect } from "next/navigation";
-<<<<<<< HEAD
 import { useAuth, useGoogleAuthUrl } from "@/hooks/useAuth";
-=======
-import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 import { GoogleSignInButton } from "./google-signin-button";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { setEmailCookie } from "@/utils/emailCookie";
@@ -40,10 +35,7 @@ const AdminSignupForm: FC<AdminSignupFormProps> = ({}) => {
    const [googleLoading, setGoogleLoading] = useState(false);
    const [phoneDisplay, setPhoneDisplay] = useState<string>("");
    const { signUp } = useAuth();
-<<<<<<< HEAD
    const { mutateAsync: getGoogleAuthUrl } = useGoogleAuthUrl();
-=======
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
    // Google sign-up handler (same as sign-in)
    const handleGoogleSignUp = async () => {
       setGoogleLoading(true);
@@ -52,18 +44,10 @@ const AdminSignupForm: FC<AdminSignupFormProps> = ({}) => {
             typeof window !== "undefined" ? window.location.origin : "";
 
          // For signup, we redirect to /signin after OAuth completes
-<<<<<<< HEAD
          const callbackUrl = `${origin}/auth/callback`;
 
          console.log("Starting Google signup...");
          console.log("- Callback URL:", callbackUrl);
-=======
-         // No need to preserve redirect param for signup flow
-         const redirectTo = `${origin}/auth/callback`;
-
-         console.log("Starting Google signup...");
-         console.log("- Callback URL:", redirectTo);
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
          // Inform the user that we're redirecting them to Google
          try {
@@ -72,35 +56,14 @@ const AdminSignupForm: FC<AdminSignupFormProps> = ({}) => {
             // ignore toast errors
          }
 
-<<<<<<< HEAD
-         // Get Google OAuth URL from backend
-         const { url } = await getGoogleAuthUrl();
+         // Get Google OAuth URL from backend - no state needed for signup
+         const { url } = await getGoogleAuthUrl(undefined);
 
          // Redirect to Google OAuth
          window.location.href = url;
       } catch (err: any) {
          console.error("Google sign-up failed:", err);
          toast.error(err?.message || t("auth.google.failed"));
-=======
-         const { error } = await supabase.auth.signInWithOAuth({
-            provider: "google",
-            options: {
-               redirectTo,
-               queryParams: {
-                  access_type: "offline",
-               },
-            },
-         });
-
-         if (error) {
-            console.error("Google OAuth initiation error (signup):", error);
-            toast.error(t("auth.google.startFailed"));
-         }
-      } catch (err: any) {
-         console.error("Google sign-up failed:", err);
-         toast.error(err?.message || t("auth.google.failed"));
-      } finally {
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          setGoogleLoading(false);
       }
    };

@@ -32,6 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useOrders } from "@/hooks/useOrders";
+import { type Order } from "@/types/orders";
 import { useNotifications } from "@/contexts/NotificationsContext";
 import { useRouter } from "next/navigation";
 
@@ -192,18 +193,18 @@ const Profile = () => {
 
       // completed orders are those delivered
       const completedOrders = orders.filter(
-         (order) => order.status === "delivered"
+         (order: Order) => order.status === "delivered"
       ).length;
 
       // active orders count
-      const activeOrders = orders.filter((order) =>
+      const activeOrders = orders.filter((order: Order) =>
          activeStatuses.includes(order.status || "")
       ).length;
 
       // totalSpent: sum totals for completed orders only (exclude cancelled/refunded/unsettled)
       const totalSpent = orders
-         .filter((order) => order.status === "delivered")
-         .reduce((sum, order) => sum + Number(order.total || 0), 0);
+         .filter((order: Order) => order.status === "delivered")
+         .reduce((sum: number, order: Order) => sum + Number(order.total || 0), 0);
 
       // averageOrder: average of completed orders (fallback to 0)
       const averageOrder =
@@ -212,7 +213,7 @@ const Profile = () => {
       // recentOrders: sort by created_at desc then take first 3 (guard for missing created_at)
       const recentOrders = orders
          .slice()
-         .sort((a, b) => {
+         .sort((a: Order, b: Order) => {
             const ta = new Date(a.created_at || 0).getTime();
             const tb = new Date(b.created_at || 0).getTime();
             return tb - ta;

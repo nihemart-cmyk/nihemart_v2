@@ -2,11 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-<<<<<<< HEAD
 import { useMyRiderProfile } from "@/hooks/useRiders";
-=======
-import { useRiderByUserId } from "@/hooks/useRiders";
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -57,11 +53,7 @@ export default function RiderSettingsPage() {
    const { user } = useAuth();
    // Editing is revoked for riders: make this page view-only
    const [saving, setSaving] = useState(false);
-<<<<<<< HEAD
    const { data: rider, isLoading: loading } = useMyRiderProfile();
-=======
-   const { data: rider, isLoading: loading } = useRiderByUserId(user?.id);
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
    // Local state used only for display; inputs are disabled
    const [fullName] = React.useState("");
@@ -188,11 +180,11 @@ export default function RiderSettingsPage() {
                                     className="w-16 h-16"
                                     user={{
                                        fullName:
-                                          rider?.full_name ||
+                                          rider?.fullName ||
                                           user?.email ||
                                           "Rider",
                                        subTitle: rider?.location || "",
-                                       imageUrl: rider?.image_url || "",
+                                       imageUrl: rider?.imageUrl || "",
                                     }}
                                  />
                               </div>
@@ -204,7 +196,7 @@ export default function RiderSettingsPage() {
                            </div>
                            <div className="flex-1 min-w-0">
                               <h3 className="font-bold text-lg text-gray-900 truncate">
-                                 {rider?.full_name || user?.email || "Rider"}
+                                 {rider?.fullName || user?.email || "Rider"}
                               </h3>
                               <p className="text-gray-500 text-sm truncate">
                                  ID: #{rider.id.slice(0, 8)}
@@ -267,7 +259,7 @@ export default function RiderSettingsPage() {
                               Full Name
                            </Label>
                            <Input
-                              value={rider?.full_name || ""}
+                              value={rider?.fullName || ""}
                               placeholder="Full name"
                               disabled
                               className="h-11 focus-visible:ring-orange-500"

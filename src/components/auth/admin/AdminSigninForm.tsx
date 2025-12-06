@@ -23,16 +23,9 @@ import Link from "next/link";
 import { Mail, Lock, Eye, EyeOff, Loader } from "lucide-react";
 import { toast } from "sonner";
 import { setEmailCookie } from "@/utils/emailCookie";
-<<<<<<< HEAD
 import { useAuth, useGoogleAuthUrl } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-=======
-import { useAuth } from "@/hooks/useAuth";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 import { GoogleSignInButton } from "./google-signin-button";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -44,10 +37,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
    const [showPassword, setShowPassword] = useState<boolean>(false);
    const [googleLoading, setGoogleLoading] = useState(false);
    const { signIn, hasRole, user, loading } = useAuth();
-<<<<<<< HEAD
    const { mutateAsync: getGoogleAuthUrl } = useGoogleAuthUrl();
-=======
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
    const router = useRouter();
    // Use the prop if provided, otherwise derive from window.location in effect
    const [redirectParamState, setRedirectParamState] = useState<string | null>(
@@ -79,11 +69,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
       }
    }, []);
 
-<<<<<<< HEAD
    // Google sign-in handler
-=======
-   // Google sign-in handler - FIXED
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
    const { t } = useLanguage();
 
    const handleGoogleSignIn = async () => {
@@ -92,12 +78,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          const origin =
             typeof window !== "undefined" ? window.location.origin : "";
 
-<<<<<<< HEAD
          // Store redirect in localStorage before OAuth redirect
-=======
-         // CRITICAL: Store redirect in localStorage before OAuth redirect
-         // because Supabase OAuth doesn't reliably preserve query parameters
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          if (redirectParam) {
             try {
                localStorage.setItem("oauth_redirect", redirectParam);
@@ -114,25 +95,15 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
             }
          }
 
-<<<<<<< HEAD
          // Build callback URL
          const callbackUrl = `${origin}/auth/callback`;
-         const state = redirectParam
+         const state: string | undefined = redirectParam
             ? encodeURIComponent(redirectParam)
             : undefined;
 
          console.log("Starting Google OAuth...");
          console.log("- Redirect param:", redirectParam);
          console.log("- Callback URL:", callbackUrl);
-=======
-         // Build callback URL - don't add redirect as query param
-         // because it will likely be stripped by OAuth flow
-         const redirectTo = `${origin}/auth/callback`;
-
-         console.log("Starting Google OAuth...");
-         console.log("- Origin redirect param:", redirectParam);
-         console.log("- Callback URL:", redirectTo);
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
 
          // Inform the user that we're redirecting them to Google
          try {
@@ -141,37 +112,11 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
             // ignore toast errors
          }
 
-<<<<<<< HEAD
          // Get Google OAuth URL from backend
          const { url } = await getGoogleAuthUrl(state);
 
          // Redirect to Google OAuth
          window.location.href = url;
-=======
-         const { error } = await supabase.auth.signInWithOAuth({
-            provider: "google",
-            options: {
-               redirectTo,
-               queryParams: {
-                  access_type: "offline",
-               },
-            },
-         });
-
-         // Note: Most OAuth flows will redirect before we reach here
-         // Only handle errors that prevent the redirect
-         if (error) {
-            console.error("Google OAuth initiation error:", error);
-            toast.error(t("auth.google.startFailed"));
-
-            // Clear stored redirect on error
-            try {
-               localStorage.removeItem("oauth_redirect");
-            } catch (e) {
-               // ignore
-            }
-         }
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
       } catch (err: any) {
          console.error("Google sign-in failed:", err);
          toast.error(err?.message || t("auth.google.failed"));
@@ -182,11 +127,6 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          } catch (e) {
             // ignore
          }
-<<<<<<< HEAD
-=======
-      } finally {
-         // Note: This may not execute if OAuth redirect happens
->>>>>>> f3f7477e34a7b7ab8c2edc0fa2c4ed4f323ac3c6
          setGoogleLoading(false);
       }
    };

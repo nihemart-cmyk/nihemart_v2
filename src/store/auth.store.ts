@@ -174,6 +174,5 @@ useAuthStore.subscribe(
       if (state.accessToken !== state.token) {
          useAuthStore.setState({ token: state.accessToken });
       }
-   },
-   (state) => state.accessToken
+   }
 );

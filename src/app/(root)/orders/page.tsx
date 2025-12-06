@@ -36,7 +36,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/hooks/useAuth";
 import { useOrders } from "@/hooks/useOrders";
 import { useRouter } from "next/navigation";
-import { OrderStatus } from "@/types/orders";
+import { OrderStatus, type Order, type OrderItem } from "@/types/orders";
 
 const Orders = () => {
    const { t } = useLanguage();
@@ -308,7 +308,7 @@ const Orders = () => {
          ) : (
             <>
                <div className="space-y-4 sm:space-y-6">
-                  {ordersData.data.map((order) => (
+                  {ordersData.data.map((order: Order) => (
                      <Card
                         key={order.id}
                         className="hover:shadow-md transition-shadow overflow-hidden"
@@ -382,7 +382,7 @@ const Orders = () => {
                         <CardContent className="p-4 sm:p-6">
                            <div className="space-y-3">
                               {order.items && order.items.length > 0 ? (
-                                 order.items.slice(0, 3).map((item, index) => (
+                                 order.items.slice(0, 3).map((item: OrderItem, index: number) => (
                                     <div
                                        key={index}
                                        className="flex justify-between items-start py-2 border-b last:border-b-0"
