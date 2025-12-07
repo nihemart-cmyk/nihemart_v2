@@ -5,7 +5,7 @@ import Image from "next/image";
 import { optimizeImageUrl } from "@/lib/utils";
 import { FC, RefObject, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { fetchCategoriesLight } from "@/integrations/supabase/categories";
+import { fetchCategoriesLight } from "@/lib/api/products";
 import type { CategoryLight } from "@/integrations/supabase/categories";
 import { useLanguage } from "@/contexts/LanguageContext";
 import MaxWidthWrapper from "../MaxWidthWrapper";

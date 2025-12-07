@@ -2,10 +2,14 @@
 
 import React, { use, useEffect, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
-import { fetchProductWithReviews } from "@/integrations/supabase/products";
+import { fetchProductWithReviews } from "@/lib/api/products";
 import ProductReviewsClientPage from "./product-reviews-client-page";
 
-export default function ProductReviewsPage({ params }: { params: Promise<{ id: string }> }) {
+export default function ProductReviewsPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = use(params);
   const router = useRouter();
 

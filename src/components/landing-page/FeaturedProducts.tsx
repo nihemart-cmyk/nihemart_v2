@@ -6,9 +6,9 @@ import { useMediaQuery } from "@/hooks/user-media-query";
 import {
   fetchProductsUnder15k,
   fetchStoreCategories,
-  StoreProduct,
-  StoreCategorySimple,
-} from "@/integrations/supabase/store";
+  type StoreProduct,
+  type StoreCategorySimple,
+} from "@/lib/api/products";
 import Link from "next/link";
 import Image from "next/image";
 import { optimizeImageUrl } from "@/lib/utils";

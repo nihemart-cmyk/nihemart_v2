@@ -14,7 +14,7 @@ import {
   Product,
   fetchProductForEdit,
   fetchProductsLight,
-} from "@/integrations/supabase/products";
+} from "@/lib/api/products";
 import { useQuery } from "@tanstack/react-query";
 import { useOrders } from "@/hooks/useOrders";
 import { useRouter } from "next/navigation";

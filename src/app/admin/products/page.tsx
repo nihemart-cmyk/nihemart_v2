@@ -15,13 +15,13 @@ import {
   deleteProduct,
   updateProduct,
   fetchCategoriesWithSubcategories,
-} from "@/integrations/supabase/products";
+} from "@/lib/api/products";
 import type {
   Product,
   Category,
   Subcategory,
   ProductListPageFilters,
-} from "@/integrations/supabase/products";
+} from "@/lib/api/products";
 
 export default function ProductsPage() {
   return (

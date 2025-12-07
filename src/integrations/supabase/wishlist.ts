@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { Product } from "@/integrations/supabase/products";
+import type { Product } from "@/lib/api/products";
 
 const sb = supabase as any;
 
@@ -17,7 +17,9 @@ export interface WishlistItemWithProduct extends WishlistItem {
 
 // Add product to wishlist
 export async function addToWishlist(productId: string): Promise<WishlistItem> {
-  const { data: { user } } = await sb.auth.getUser();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
   if (!user) throw new Error("User not authenticated");
 
   const { data, error } = await sb
@@ -48,7 +50,7 @@ export async function isInWishlist(productId: string): Promise<boolean> {
     .eq("product_id", productId)
     .single();
 
-  if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
+  if (error && error.code !== "PGRST116") throw error; // PGRST116 is "not found"
   return !!data;
 }
 
@@ -56,13 +58,15 @@ export async function isInWishlist(productId: string): Promise<boolean> {
 export async function getWishlist(): Promise<WishlistItemWithProduct[]> {
   const { data, error } = await sb
     .from("wishlist")
-    .select(`
+    .select(
+      `
       id,
       user_id,
       product_id,
       created_at,
       product:products(*)
-    `)
+    `
+    )
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -80,7 +84,9 @@ export async function getWishlistCount(): Promise<number> {
 }
 
 // Toggle product in wishlist (add if not exists, remove if exists)
-export async function toggleWishlist(productId: string): Promise<{ added: boolean; item?: WishlistItem }> {
+export async function toggleWishlist(
+  productId: string
+): Promise<{ added: boolean; item?: WishlistItem }> {
   const isInWishlistAlready = await isInWishlist(productId);
 
   if (isInWishlistAlready) {

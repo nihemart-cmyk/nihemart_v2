@@ -2,10 +2,14 @@
 
 import React, { use, useEffect, useState } from "react";
 import { notFound, useRouter } from "next/navigation";
-import { fetchProductForEdit } from "@/integrations/supabase/products";
+import { fetchProductForEdit } from "@/lib/api/products";
 import AddEditProductForm from "@/components/admin/add-edit-product-form";
 
-export default function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
+export default function EditProductPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { id } = use(params);
   const router = useRouter();
 
@@ -17,13 +21,13 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
       try {
         const productData = await fetchProductForEdit(id);
         if (!productData || !productData.product) {
-          return notFound()
+          return notFound();
         } else {
           setData(productData);
         }
       } catch (error) {
         console.error("Error fetching product:", error);
-        return notFound()
+        return notFound();
       } finally {
         setLoading(false);
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Product } from "@/integrations/supabase/products";
+import type { Product } from "@/lib/api/products";
 import { useState, useEffect } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
