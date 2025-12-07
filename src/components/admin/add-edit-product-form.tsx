@@ -9,6 +9,9 @@ import {
   useForm,
   useFieldArray,
   useWatch,
+  Control,
+  FieldValues,
+  Path,
 } from "react-hook-form";
 import { useQuill } from "react-quilljs";
 import * as z from "zod";
@@ -49,7 +52,7 @@ import {
 } from "@/lib/api/products";
 import type {
   ProductBase,
-  ProductVariationInput,
+  ProductVariation,
   CategoryWithSubcategories,
   Subcategory,
   Product,
@@ -57,6 +60,16 @@ import type {
 } from "@/lib/api/products";
 import { VariantGeneratorDialog } from "@/components/admin/variant-generator-dialog";
 import { getProductErrorMessage } from "./admin-products-utils";
+import { supabase } from "@/integrations/supabase/client";
+
+// Helper function to upload files to Supabase storage bucket
+async function uploadFileToBucket(file: File, bucket: string): Promise<string> {
+  const filePath = `${Date.now()}-${file.name}`;
+  const { error } = await supabase.storage.from(bucket).upload(filePath, file);
+  if (error) throw error;
+  const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+  return data.publicUrl;
+}
 
 const optionalNumber = z.preprocess(
   (val) => (val === "" || val === null ? undefined : val),
@@ -80,31 +93,33 @@ const variationSchema = z.object({
   existingImages: z.custom<ProductImage[]>().optional(),
 });
 
-const productSchema = z.object({
-  name: z.string().min(3, "Product name is required"),
-  description: z.preprocess(
-    (val) =>
-      val === null || val === undefined || val === "" ? undefined : val,
-    z.string().optional()
-  ),
-  short_description: z.string().optional(),
-  categories: z.array(z.string()).default([]),
-  subcategories: z.array(z.string()).default([]),
-  price: z.coerce.number().min(0, "Base price is required"),
-  cost_price: z.coerce.number().min(0, "Cost price is required").optional(),
-  compare_at_price: optionalNumber,
-  status: z.enum(["draft", "active", "out_of_stock"]),
-  sku: z.string().optional(),
-  featured: z.boolean().default(false),
-  track_quantity: z.boolean().default(true),
-  continue_selling_when_oos: z.boolean().default(false),
-  requires_shipping: z.boolean().default(true),
-  taxable: z.boolean().default(false),
-  dimensions: z.string().optional(),
-  tags: z.array(z.string()).default([]),
-  variations: z.array(variationSchema).min(0),
-  social_media_link: z.string().optional(),
-});
+const productSchema = z
+  .object({
+    name: z.string().min(3, "Product name is required"),
+    description: z.preprocess(
+      (val) =>
+        val === null || val === undefined || val === "" ? undefined : val,
+      z.string().optional()
+    ),
+    short_description: z.string().optional(),
+    categories: z.array(z.string()).default([]),
+    subcategories: z.array(z.string()).default([]),
+    price: z.coerce.number().min(0, "Base price is required"),
+    cost_price: z.coerce.number().min(0, "Cost price is required").optional(),
+    compare_at_price: optionalNumber,
+    status: z.enum(["draft", "active", "out_of_stock"]),
+    sku: z.string().optional(),
+    featured: z.boolean().default(false),
+    track_quantity: z.boolean().default(true),
+    continue_selling_when_oos: z.boolean().default(false),
+    requires_shipping: z.boolean().default(true),
+    taxable: z.boolean().default(false),
+    dimensions: z.string().optional(),
+    tags: z.array(z.string()).default([]),
+    variations: z.array(variationSchema).min(0),
+    social_media_link: z.string().optional(),
+  })
+  .strict();
 
 type ProductFormData = z.infer<typeof productSchema>;
 interface DisplayImage {
@@ -134,13 +149,24 @@ export default function AddEditProductForm({
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const { quill, quillRef } = useQuill({ theme: "snow" });
 
-  const form = useForm({
-    resolver: zodResolver(productSchema),
-    // @ts-ignore
+  const form = useForm<ProductFormData>({
+    resolver: zodResolver(productSchema) as any,
     defaultValues: isEditMode
       ? {
-          ...initialData.product,
           name: initialData.product.name || "Product Name",
+          description: initialData.product.description || undefined,
+          short_description: initialData.product.short_description || "",
+          categories:
+            initialData.product.categories?.map((cat) =>
+              typeof cat === "string" ? cat : cat.id
+            ) || [],
+          subcategories:
+            initialData.product.subcategories?.map((sub) =>
+              typeof sub === "string" ? sub : sub.id
+            ) || [],
+          price: initialData.product.price ?? 0,
+          cost_price: initialData.product.cost_price ?? 0,
+          compare_at_price: initialData.product.compare_at_price ?? undefined,
           status:
             initialData.product.status &&
             ["draft", "active", "out_of_stock"].includes(
@@ -148,23 +174,22 @@ export default function AddEditProductForm({
             )
               ? initialData.product.status
               : "draft",
-          price: initialData.product.price ?? 0,
-          cost_price: initialData.product.cost_price ?? 0,
           sku: initialData.product.sku ?? undefined,
-          compare_at_price: initialData.product.compare_at_price ?? null,
-          short_description: initialData.product.short_description ?? "",
-          categories: initialData.product.categories ?? [],
-          subcategories: initialData.product.subcategories ?? [],
-          dimensions: initialData.product.dimensions ?? "",
-          tags: initialData.product.tags ?? [],
-          social_media_link: initialData.product.social_media_link ?? "",
+          featured: initialData.product.featured ?? false,
+          track_quantity: initialData.product.track_quantity ?? true,
+          continue_selling_when_oos:
+            initialData.product.continue_selling_when_oos ?? false,
+          requires_shipping: initialData.product.requires_shipping ?? true,
+          taxable: initialData.product.taxable ?? false,
+          dimensions: initialData.product.dimensions || undefined,
+          tags: initialData.product.tags || [],
           variations: initialData.variations.map((v) => ({
             id: undefined,
+            name: v.name || "",
             price: v.price ?? 0,
             stock: v.stock ?? 0,
-            name: v.name ?? "",
-            sku: v.sku ?? "",
-            barcode: v.barcode ?? "",
+            sku: v.sku || "",
+            barcode: v.barcode || "",
             attributes: Object.entries(v.attributes || {})
               .filter(
                 ([name, value]) =>
@@ -177,24 +202,28 @@ export default function AddEditProductForm({
             imageFiles: [],
             existingImages: v.images || [],
           })),
+          social_media_link: initialData.product.social_media_link || "",
         }
       : {
           name: "",
-          status: "draft",
+          description: undefined,
+          short_description: "",
+          status: "draft" as const,
           price: 0,
           cost_price: 0,
-          compare_at_price: null,
+          compare_at_price: undefined,
+          sku: undefined,
           featured: false,
           track_quantity: true,
           continue_selling_when_oos: false,
           requires_shipping: true,
           taxable: false,
+          dimensions: undefined,
           categories: [],
           subcategories: [],
           tags: [],
           social_media_link: "",
           variations: [],
-          //  variations: [{ name: "Default", price: 0, stock: 0, attributes: [{ name: "Title", value: "Default" }], imageFiles: [] }],
         },
   });
 
@@ -270,7 +299,7 @@ export default function AddEditProductForm({
             try {
               const url = await uploadFileToBucket(
                 input.files[0],
-                "prodct-content-bucket"
+                "product-content-bucket"
               );
               const range = quill.getSelection(true);
               quill.insertEmbed(range.index, "image", url);
@@ -320,21 +349,19 @@ export default function AddEditProductForm({
       };
 
       console.log({ productBaseData });
-      const variationsInput: ProductVariationInput[] = data.variations.map(
-        (v) => ({
-          name: v.name || null,
-          price: v.price,
-          stock: v.stock,
-          sku: v.sku || null,
-          barcode: v.barcode || null,
-          attributes: v.attributes.reduce(
-            (acc, attr) => ({ ...acc, [attr.name]: attr.value }),
-            {}
-          ),
-          imageFiles: v.imageFiles,
-          existingImages: v.existingImages,
-        })
-      );
+      const variationsInput: ProductVariation[] = data.variations.map((v) => ({
+        name: v.name || null,
+        price: v.price,
+        stock: v.stock,
+        sku: v.sku || null,
+        barcode: v.barcode || null,
+        attributes: v.attributes.reduce(
+          (acc, attr) => ({ ...acc, [attr.name]: attr.value }),
+          {}
+        ),
+        imageFiles: v.imageFiles,
+        existingImages: v.existingImages,
+      }));
 
       if (isEditMode) {
         await updateProductWithImages(
@@ -424,7 +451,6 @@ export default function AddEditProductForm({
                       <CardTitle>General Information</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="name"
@@ -438,7 +464,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="sku"
@@ -452,7 +477,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="short_description"
@@ -466,7 +490,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="social_media_link"
@@ -605,7 +628,6 @@ export default function AddEditProductForm({
                       <CardTitle>Organization</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="status"
@@ -633,7 +655,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="categories"
@@ -692,7 +713,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="subcategories"
@@ -752,7 +772,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="tags"
@@ -778,7 +797,6 @@ export default function AddEditProductForm({
                       <CardTitle>Pricing</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="price"
@@ -792,7 +810,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="cost_price"
@@ -811,7 +828,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="compare_at_price"
@@ -839,9 +855,7 @@ export default function AddEditProductForm({
                       <CardTitle>Shipping & Inventory</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* @ts-ignore */}
                       {/* <FormField control={form.control} name="dimensions" render={({ field }) => <FormItem><FormLabel>Dimensions (e.g., 24x12x12 cm)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>} /> */}
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="requires_shipping"
@@ -857,7 +871,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="track_quantity"
@@ -873,7 +886,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="continue_selling_when_oos"
@@ -889,7 +901,6 @@ export default function AddEditProductForm({
                           </FormItem>
                         )}
                       />
-                      {/* @ts-ignore */}
                       <FormField
                         control={form.control}
                         name="featured"
@@ -930,7 +941,7 @@ function VariantCard({
   removeVariant,
   isEditMode,
 }: {
-  form: any;
+  form: ReturnType<typeof useForm<ProductFormData>>;
   index: number;
   removeVariant: (index: number) => void;
   isEditMode: boolean;
@@ -984,7 +995,8 @@ function VariantCard({
   const removeImg = (imgIndex: number) => {
     const imageToRemove = imageFiles[imgIndex];
     if (!imageToRemove.isExisting) {
-      const currentFiles = form.getValues(`variations.${index}.imageFiles`);
+      const currentFiles =
+        form.getValues(`variations.${index}.imageFiles`) || [];
       form.setValue(
         `variations.${index}.imageFiles`,
         currentFiles.filter(
@@ -1007,7 +1019,6 @@ function VariantCard({
         <Trash2 className="h-4 w-4 text-destructive" />
       </Button>
 
-      {/* @ts-ignore */}
       <FormField
         control={form.control}
         name={`variations.${index}.name`}
@@ -1023,7 +1034,6 @@ function VariantCard({
       />
 
       <div className="grid grid-cols-2 gap-4">
-        {/* @ts-ignore */}
         <FormField
           control={form.control}
           name={`variations.${index}.price`}
@@ -1037,7 +1047,6 @@ function VariantCard({
             </FormItem>
           )}
         />
-        {/* @ts-ignore */}
         <FormField
           control={form.control}
           name={`variations.${index}.stock`}
@@ -1053,7 +1062,6 @@ function VariantCard({
         />
       </div>
       <div className="grid grid-cols-2 gap-4">
-        {/* @ts-ignore */}
         <FormField
           control={form.control}
           name={`variations.${index}.sku`}
@@ -1067,7 +1075,6 @@ function VariantCard({
             </FormItem>
           )}
         />
-        {/* @ts-ignore */}
         <FormField
           control={form.control}
           name={`variations.${index}.barcode`}
@@ -1092,7 +1099,6 @@ function VariantCard({
             return (
               <div key={field.id} className="flex items-center gap-2">
                 <div className="grid grid-cols-2 gap-2 flex-1">
-                  {/* @ts-ignore */}
                   <FormField
                     control={form.control}
                     name={`variations.${index}.attributes.${attrIndex}.name`}
@@ -1103,7 +1109,6 @@ function VariantCard({
                       />
                     )}
                   />
-                  {/* @ts-ignore */}
                   <FormField
                     control={form.control}
                     name={`variations.${index}.attributes.${attrIndex}.value`}

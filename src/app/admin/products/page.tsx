@@ -31,6 +31,19 @@ export default function ProductsPage() {
   );
 }
 
+interface ProductExportRow {
+  ID: string;
+  Name: string;
+  Status: string | undefined;
+  Category: string;
+  Brand: string;
+  Price: number;
+  Stock: number;
+  SKU: string;
+  Featured: string;
+  "Created At": string;
+}
+
 function ProductsPageContent() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
@@ -77,12 +90,14 @@ function ProductsPageContent() {
     const loadCategoriesData = async () => {
       try {
         const categoriesWithSubs = await fetchCategoriesWithSubcategories();
-        const allCategories = categoriesWithSubs.map(({ id, name }) => ({
-          id,
-          name,
-        }));
+        const allCategories = categoriesWithSubs.map(
+          ({ id, name }: { id: string; name: string }) => ({
+            id,
+            name,
+          })
+        );
         const allSubcategories = categoriesWithSubs.flatMap(
-          (c) => c.subcategories
+          (c: { subcategories: Subcategory[] }) => c.subcategories
         );
         setCategories(allCategories);
         setSubcategories(allSubcategories);
@@ -145,18 +160,20 @@ function ProductsPageContent() {
         sort,
       });
 
-      const productDataForSheet = productsToExport.map((p) => ({
-        ID: p.id,
-        Name: p.name,
-        Status: p.status,
-        Category: p.category?.name || "N/A",
-        Brand: p.brand || "",
-        Price: p.price,
-        Stock: p.stock || 0,
-        SKU: p.sku || "",
-        Featured: p.featured ? "Yes" : "No",
-        "Created At": new Date(p.created_at).toLocaleString(),
-      }));
+      const productDataForSheet: ProductExportRow[] = productsToExport.map(
+        (p: Product) => ({
+          ID: p.id,
+          Name: p.name,
+          Status: p.status,
+          Category: p.category?.name || "N/A",
+          Brand: p.brand || "",
+          Price: p.price,
+          Stock: p.stock || 0,
+          SKU: p.sku || "",
+          Featured: p.featured ? "Yes" : "No",
+          "Created At": new Date(p.created_at).toLocaleString(),
+        })
+      );
 
       const analyticsData = [
         ["Analytics Summary", ""],
@@ -166,21 +183,24 @@ function ProductsPageContent() {
         ["Total Products Exported", productsToExport.length],
         [
           "Total Active Products",
-          productsToExport.filter((p) => p.status === "active").length,
+          productsToExport.filter((p: Product) => p.status === "active").length,
         ],
         [
           "Total Draft Products",
-          productsToExport.filter((p) => p.status === "draft").length,
+          productsToExport.filter((p: Product) => p.status === "draft").length,
         ],
         [
           "Total Stock Units",
-          productsToExport.reduce((sum, p) => sum + (p.stock || 0), 0),
+          productsToExport.reduce(
+            (sum: number, p: Product) => sum + (p.stock || 0),
+            0
+          ),
         ],
         [],
         ["Products by Category", ""],
         ...Object.entries(
           productsToExport.reduce(
-            (acc, p) => {
+            (acc: Record<string, number>, p: Product) => {
               const cat = p.category?.name || "Uncategorized";
               acc[cat] = (acc[cat] || 0) + 1;
               return acc;
