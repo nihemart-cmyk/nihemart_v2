@@ -223,32 +223,33 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
       // NOTE: We use Socket.IO for realtime notifications instead of Supabase.
       // Socket.IO automatically handles reconnection, so we don't need aggressive polling.
-      // We'll keep a lightweight heartbeat that falls back to fetching persisted notifications
-      // if no realtime events arrive within a short window.
+      // We'll only poll as a fallback if the socket is disconnected for an extended period.
 
-      const lastEventAt = { current: Date.now() } as { current: number };
-      let heartbeatInterval: any = null;
+      let fallbackPollInterval: any = null;
 
-      const startHeartbeat = () => {
-         // Check every 8s; if no event in the last 12s, fetch persisted
-         // notifications as a fallback.
-         heartbeatInterval = setInterval(() => {
+      const startFallbackPoll = () => {
+         // Only poll if socket is disconnected for more than 30 seconds
+         // This is a last resort fallback - Socket.IO should handle reconnection automatically
+         fallbackPollInterval = setInterval(() => {
             try {
-               const now = Date.now();
-               if (now - lastEventAt.current > 12000) {
+               const socket = socketRef.current;
+               if (!socket || !socket.connected) {
+                  // Socket is disconnected - check if it's been disconnected for a while
+                  // If so, fetch persisted notifications as fallback
                   // eslint-disable-next-line no-console
                   console.debug(
-                     "No realtime notifications seen recently — polling for updates"
+                     "Socket disconnected - fetching notifications as fallback"
                   );
                   fetchPersisted();
                }
             } catch (e) {}
-         }, 8000);
+         }, 30000); // Check every 30 seconds (much less frequent)
       };
 
-      const stopHeartbeat = () => {
+      const stopFallbackPoll = () => {
          try {
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            if (fallbackPollInterval) clearInterval(fallbackPollInterval);
+            fallbackPollInterval = null;
          } catch (e) {}
       };
 
@@ -275,7 +276,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             try {
                // eslint-disable-next-line no-console
                console.debug("Socket.IO received notification:new", notification?.id);
-               lastEventAt.current = Date.now();
                handleRealtimeRow(notification);
             } catch (e) {
                console.error("Error handling notification:new", e);
@@ -287,7 +287,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             try {
                // eslint-disable-next-line no-console
                console.debug("Socket.IO received notification:updated", notification?.id);
-               lastEventAt.current = Date.now();
                handleRealtimeRow(notification);
             } catch (e) {
                console.error("Error handling notification:updated", e);
@@ -299,7 +298,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             try {
                // eslint-disable-next-line no-console
                console.debug("Socket.IO received notification:created", notification?.id);
-               lastEventAt.current = Date.now();
                handleRealtimeRow(notification);
             } catch (e) {
                console.error("Error handling notification:created", e);
@@ -312,15 +310,22 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             console.debug("Socket.IO connected for notifications");
             // Subscribe to notifications
             socket.emit("subscribe:notifications");
+            // Stop fallback polling when connected
+            stopFallbackPoll();
          });
 
          socket.on("disconnect", (reason) => {
             // eslint-disable-next-line no-console
             console.debug("Socket.IO disconnected:", reason);
+            // Start fallback polling only if disconnected
+            // Socket.IO will try to reconnect automatically
+            startFallbackPoll();
          });
 
-         // Start heartbeat to detect silent disconnects
-         startHeartbeat();
+         // Start fallback poll only if socket is not connected initially
+         if (!socket.connected) {
+            startFallbackPoll();
+         }
 
          // eslint-disable-next-line no-console
          console.debug("Socket.IO notifications setup complete", {
@@ -358,8 +363,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             );
          } catch (e) {}
          try {
-            // mark event seen for heartbeat fallback
-            // (if setupRealtime hasn't created lastEventAt reference yet this is fine)
+            // Event handled via Socket.IO realtime
             // eslint-disable-next-line no-console
             // small defensive guard
          } catch (e) {}
@@ -527,7 +531,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
       return () => {
          try {
-            stopHeartbeat();
+            stopFallbackPoll();
          } catch (e) {}
          
          try {
