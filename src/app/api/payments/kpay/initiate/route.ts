@@ -12,7 +12,8 @@ function getAuthToken(request: NextRequest): string | null {
 }
 
 export interface PaymentInitiationRequest {
-   orderId: string; // Required in one-way flow
+   orderId?: string; // Optional - for backward compatibility
+   orderData?: any; // Full order data to create after payment succeeds
    amount: number;
    customerName: string;
    customerEmail: string;
@@ -39,10 +40,10 @@ export async function POST(request: NextRequest) {
          customerEmail: body.customerEmail,
       });
 
-      // Basic validation - orderId is now required (one-way flow)
-      if (!body.orderId) {
+      // Basic validation - either orderId (for backward compatibility) or orderData is required
+      if (!body.orderId && !body.orderData) {
          return NextResponse.json(
-            { error: "orderId is required" },
+            { error: "Either orderId or orderData is required" },
             { status: 400 }
          );
       }
@@ -66,7 +67,8 @@ export async function POST(request: NextRequest) {
             ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
          },
          body: JSON.stringify({
-            orderId: body.orderId,
+            orderId: body.orderId, // Optional - for backward compatibility
+            orderData: body.orderData, // New - order data to create after payment
             amount: body.amount,
             customerName: body.customerName,
             customerEmail: body.customerEmail,
@@ -74,7 +76,7 @@ export async function POST(request: NextRequest) {
             customerNumber: body.customerNumber || body.customerPhone,
             paymentMethod: body.paymentMethod,
             redirectUrl: body.redirectUrl,
-            orderDetails: body.orderDetails || `Order ${body.orderId}`,
+            orderDetails: body.orderDetails || (body.orderId ? `Order ${body.orderId}` : "Payment"),
             bankId: body.bankId,
          }),
       });
@@ -98,12 +100,30 @@ export async function POST(request: NextRequest) {
 
       // Transform backend response to match frontend expectations
       const kpayData = backendData.data || {};
-      const checkoutUrl = kpayData.url || kpayData.redirecturl || kpayData.redirectUrl;
+      
+      // Extract checkout URL - check multiple possible fields
+      // For card payments, KPay typically returns url field in the response
+      const checkoutUrl = 
+         backendData.checkoutUrl || 
+         kpayData.url || 
+         kpayData.redirecturl || 
+         kpayData.redirectUrl ||
+         kpayData.checkout_url ||
+         (kpayData.useurl === 'Y' && kpayData.url ? kpayData.url : null) ||
+         null;
+      
+      const reference = backendData.reference || kpayData.reference || kpayData.orderReference || kpayData.refid;
+      const sessionId = backendData.sessionId;
 
       logger.info("api", "Payment initiated successfully", {
          orderId,
          transactionId: kpayData.tid,
-         checkoutUrl: !!checkoutUrl,
+         checkoutUrl: checkoutUrl || "NOT_FOUND",
+         hasUrl: !!kpayData.url,
+         hasRedirecturl: !!kpayData.redirecturl,
+         useurl: kpayData.useurl,
+         reference,
+         sessionId,
       });
 
       return NextResponse.json({
@@ -111,7 +131,8 @@ export async function POST(request: NextRequest) {
          data: kpayData,
          checkoutUrl,
          transactionId: kpayData.tid,
-         reference: kpayData.reference || kpayData.orderReference,
+         reference: reference || sessionId, // Use reference or sessionId for payment page redirect
+         sessionId: sessionId,
          status: "pending",
          message: "Payment initiated successfully",
       });

@@ -11,12 +11,12 @@ import AddEditSubcategoryDialog from "@/components/admin/add-subcategory-dialog"
 import {
   fetchCategories,
   deleteCategory,
-} from "@/integrations/supabase/categories";
+} from "@/lib/api/categories";
 import {
   fetchSubcategories,
   deleteSubcategory,
 } from "@/integrations/supabase/subcategories";
-import type { Category } from "@/integrations/supabase/categories";
+import type { Category } from "@/lib/api/categories";
 import type { Subcategory } from "@/integrations/supabase/subcategories";
 import { useDebounce } from "@/hooks/use-debounce";
 
@@ -41,11 +41,11 @@ export default function CategoriesPage() {
     setLoading(true);
     try {
       // Request a large limit so the admin view shows all categories by default
-      const { data } = await fetchCategories({
+      const result = await fetchCategories({
         search: debouncedSearchTerm,
         limit: 1000,
       });
-      setCategories(data);
+      setCategories(result.data);
     } catch (error) {
       console.error("Failed to fetch categories:", error);
       setCategories([]);

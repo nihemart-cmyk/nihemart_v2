@@ -39,6 +39,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useRiders } from "@/hooks/useRiders";
+import settingsAPI from "@/lib/api/settings";
+import dashboardAPI from "@/lib/api/dashboard";
 
 // Profile form schema
 const ProfileSchema = z.object({
@@ -158,63 +160,42 @@ const AdminSettings: FC = () => {
 
     const loadStats = async () => {
       try {
-        // Load dashboard stats
-        // Use type assertion to bypass TypeScript checking for orders table
-        const [usersResult, ordersResult] = await Promise.all([
-          supabase.from("profiles").select("id", { count: "exact" }),
-          (supabase as any)
-            .from("orders")
-            .select("id, total, status", { count: "exact" }),
-        ]);
-
-        const totalUsers = usersResult.count || 0;
-        const orders = ordersResult.data || [];
-        const totalOrders = ordersResult.count || 0;
-        // Revenue should reflect completed/delivered orders only (exclude cancelled/refunded)
-        const totalRevenue = orders
-          .filter((order: any) => order.status === "delivered")
-          .reduce(
-            (sum: number, order: any) => sum + Number(order.total || 0),
-            0
-          );
-        const pendingOrders = orders.filter((order: any) =>
-          ["pending", "processing"].includes(order.status || "")
-        ).length;
-        const completedOrders = orders.filter(
-          (order: any) => order.status === "delivered"
-        ).length;
-
-        // Use riders data from the hook
-        const riders = ridersData || [];
-        const activeRiders = riders.filter((rider: any) => rider.active).length;
-
+        // Load dashboard stats from backend
+        const statsData = await dashboardAPI.getStats();
+        
         setStats({
-          totalUsers,
-          totalOrders,
-          totalRevenue,
-          activeRiders,
-          pendingOrders,
-          completedOrders,
+          totalUsers: statsData.totalUsers,
+          totalOrders: statsData.totalOrders,
+          totalRevenue: statsData.totalRevenue,
+          activeRiders: statsData.activeRiders,
+          pendingOrders: statsData.pendingOrders,
+          completedOrders: statsData.completedOrders,
         });
       } catch (error) {
         console.error("Error loading stats:", error);
+        // Fallback to empty stats on error
+        setStats({
+          totalUsers: 0,
+          totalOrders: 0,
+          totalRevenue: 0,
+          activeRiders: 0,
+          pendingOrders: 0,
+          completedOrders: 0,
+        });
       }
     };
 
     const loadOrderSettings = async () => {
       try {
-        // Load orders enabled setting
-        const res = await fetch("/api/admin/settings/orders-enabled");
-        if (res.ok) {
-          const json = await res.json();
-          const ordersEnabled = Boolean(json.enabled);
-          orderSettingsForm.setValue("ordersEnabled", ordersEnabled);
-          // Optionally notify admin when schedule is currently disabling orders
-          if (json.scheduleDisabled && ordersEnabled === false) {
-            try {
-              toast("Orders currently disabled by schedule until 9am");
-            } catch (e) {}
-          }
+        // Load orders enabled setting from backend
+        const response = await settingsAPI.getOrdersEnabled();
+        const ordersEnabled = Boolean(response.enabled);
+        orderSettingsForm.setValue("ordersEnabled", ordersEnabled);
+        // Optionally notify admin when schedule is currently disabling orders
+        if (response.mode === "auto" && ordersEnabled === false) {
+          try {
+            toast("Orders currently disabled by schedule");
+          } catch (e) {}
         }
       } catch (error) {
         console.error("Error loading order settings:", error);
@@ -225,35 +206,8 @@ const AdminSettings: FC = () => {
     loadStats();
     loadOrderSettings();
 
-    // Realtime reflect orders_enabled changes in admin UI
-    const channel = supabase
-      .channel("admin_site_settings_orders_enabled")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "site_settings",
-          filter: "key=eq.orders_enabled",
-        },
-        (payload: any) => {
-          try {
-            const next = payload?.new?.value;
-            const enabled =
-              next === true ||
-              String(next) === "true" ||
-              (next && next === "true");
-            orderSettingsForm.setValue("ordersEnabled", Boolean(enabled));
-          } catch (e) {}
-        }
-      )
-      .subscribe();
-
-    return () => {
-      try {
-        supabase.removeChannel(channel);
-      } catch (e) {}
-    };
+    // Note: Realtime updates removed - using polling or manual refresh instead
+    // If needed, can add polling interval here
   }, [user, profileForm, orderSettingsForm, ridersData]);
 
   const onProfileSubmit = async (data: TProfileSchema) => {
@@ -276,21 +230,12 @@ const AdminSettings: FC = () => {
 
   const onOrderSettingsSubmit = async (data: TOrderSettingsSchema) => {
     try {
-      // Update orders enabled setting
-      const res = await fetch("/api/admin/settings/orders-enabled", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: data.ordersEnabled }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to update orders enabled setting");
-      }
-
+      // Update orders enabled setting via backend API
+      await settingsAPI.setOrdersEnabled(data.ordersEnabled);
       toast.success("Order settings updated successfully");
     } catch (error: any) {
       console.error("Error updating order settings:", error);
-      toast.error(error.message || "Failed to update order settings");
+      toast.error(error?.response?.data?.message || error.message || "Failed to update order settings");
     }
   };
 

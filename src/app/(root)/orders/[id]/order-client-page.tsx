@@ -70,6 +70,7 @@ const OrderClientPage = ({
    const { user: authUser, hasRole } = useAuth();
    const {
       useOrder,
+      cancelOrder,
       updateOrderStatus,
       useRequestRefundItem,
       useCancelRefundRequestItem,
@@ -106,37 +107,20 @@ const OrderClientPage = ({
       null
    );
 
-   const order = optimisticOrder || orderData;
-   const isOwner = user?.id === order?.user_id;
-
-   // Show loading state while fetching
-   if (orderId && isLoadingOrder) {
-      return (
-         <div className="container mx-auto px-4 py-8">
-            <div className="flex items-center justify-center min-h-[400px]">
-               <Loader2 className="h-8 w-8 animate-spin" />
-               <span className="ml-2">Loading order...</span>
-            </div>
-         </div>
-      );
-   }
-
-   // Show error if order not found
-   if (!order) {
-      return (
-         <div className="container mx-auto px-4 py-8">
-            <div className="text-center">
-               <h1 className="text-2xl font-bold mb-4">Order not found</h1>
-               <Button onClick={() => router.push("/orders")}>Back to Orders</Button>
-            </div>
-         </div>
-      );
-   }
-
    // Load canonical product images for items (prefer main_image_url)
+   // IMPORTANT: All hooks must be called before any conditional returns
    const [productImages, setProductImages] = useState<
       Record<string, string | null>
    >({});
+
+   // All hooks must be called before conditional returns
+   const requestOrderRefund = useRequestRefundOrder();
+   const cancelOrderRefund = useCancelRefundRequestOrder();
+
+   const order = optimisticOrder || orderData;
+   const isOwner = user?.id === order?.user_id;
+
+   // useEffect must be called before any conditional returns
    useEffect(() => {
       let mounted = true;
       const load = async () => {
@@ -171,6 +155,30 @@ const OrderClientPage = ({
          mounted = false;
       };
    }, [order?.items]);
+
+   // Show loading state while fetching
+   if (orderId && isLoadingOrder) {
+      return (
+         <div className="container mx-auto px-4 py-8">
+            <div className="flex items-center justify-center min-h-[400px]">
+               <Loader2 className="h-8 w-8 animate-spin" />
+               <span className="ml-2">Loading order...</span>
+            </div>
+         </div>
+      );
+   }
+
+   // Show error if order not found
+   if (!order) {
+      return (
+         <div className="container mx-auto px-4 py-8">
+            <div className="text-center">
+               <h1 className="text-2xl font-bold mb-4">Order not found</h1>
+               <Button onClick={() => router.push("/orders")}>Back to Orders</Button>
+            </div>
+         </div>
+      );
+   }
 
    // Derive a normalized order state used for action visibility
    const orderStateForActions =
@@ -226,9 +234,6 @@ const OrderClientPage = ({
 
       return false;
    })();
-
-   const requestOrderRefund = useRequestRefundOrder();
-   const cancelOrderRefund = useCancelRefundRequestOrder();
 
    const getStatusColor = (status?: string) => {
       if (!status) return "bg-gray-500";
@@ -470,14 +475,14 @@ const OrderClientPage = ({
                                           Qty: {item.quantity}
                                        </span>
                                        <span className="bg-gray-100 px-2 py-1 rounded">
-                                          Unit: {item.price.toLocaleString()}{" "}
+                                          Unit: {(item.price || 0).toLocaleString()}{" "}
                                           RWF
                                        </span>
                                     </div>
                                  </div>
                                  <div className="flex flex-col items-start lg:items-end gap-2 w-full lg:w-auto">
                                     <p className="font-semibold text-sm sm:text-base">
-                                       {item.total.toLocaleString()} RWF
+                                       {(item.total || 0).toLocaleString()} RWF
                                     </p>
 
                                     <div className="flex flex-wrap items-center gap-2">
@@ -867,7 +872,7 @@ const OrderClientPage = ({
                   <CardContent className="p-4 sm:p-6 space-y-3">
                      <div className="flex justify-between text-sm">
                         <span>Subtotal</span>
-                        <span>{order.subtotal.toLocaleString()} RWF</span>
+                        <span>{(order.subtotal || 0).toLocaleString()} RWF</span>
                      </div>
                      <div className="flex justify-between text-sm">
                         <span>Tax/Transport</span>
@@ -876,7 +881,7 @@ const OrderClientPage = ({
                      <Separator />
                      <div className="flex justify-between font-bold text-base sm:text-lg">
                         <span>Total</span>
-                        <span>{order.total.toLocaleString()} RWF</span>
+                        <span>{(order.total || 0).toLocaleString()} RWF</span>
                      </div>
                   </CardContent>
                </Card>
@@ -1167,20 +1172,13 @@ const OrderClientPage = ({
                                                    if (isUpdatingStatus) return;
                                                    setIsUpdatingStatus(true);
                                                    try {
-                                                      await handleStatusUpdate(
-                                                         "cancelled"
-                                                      );
-                                                      toast.success(
-                                                         "Order cancelled"
-                                                      );
+                                                      await cancelOrder.mutateAsync(order.id);
                                                       if (redirectAfterCancel) {
                                                          router.push("/");
                                                       }
                                                    } catch (err) {
                                                       console.error(err);
-                                                      toast.error(
-                                                         "Failed to cancel order"
-                                                      );
+                                                      // Error toast is handled by the hook
                                                    } finally {
                                                       setIsUpdatingStatus(
                                                          false

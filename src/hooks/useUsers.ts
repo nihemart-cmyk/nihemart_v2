@@ -1,46 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
-
-export type AppRole =
-  | "admin"
-  | "user"
-  | "rider"
-  | "manager"
-  | "staff"
-  | "stock_manager";
-export type SortBy =
-  | "recent"
-  | "oldest"
-  | "time_registered_asc"
-  | "time_registered_desc"
-  | "most_orders"
-  | "highest_spend"
-  | "lowest_spend";
-
-export interface UserRow {
-  id: string;
-  email: string;
-  full_name?: string;
-  phone?: string;
-  created_at?: string;
-  role?: AppRole;
-  orderCount?: number;
-  totalSpend?: number;
-}
-
-export interface UserFilters {
-  role?: AppRole | null;
-  sortBy?: SortBy;
-  fromDate?: Date | null;
-  toDate?: Date | null;
-  minOrders?: number | null;
-  maxOrders?: number | null;
-  minSpend?: number | null;
-  maxSpend?: number | null;
-  search?: string;
-}
+import userAPI, { AppRole, SortBy, UserRow, UserFilters } from "@/lib/api/users";
 
 export function useUsers() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -63,7 +24,7 @@ export function useUsers() {
     search: "",
   });
 
-  // Fetch all users from API with filters and sorting applied
+  // Fetch all users from backend API with filters and sorting applied
   const fetchUsers = useCallback(
     async (
       p: number = page,
@@ -74,105 +35,83 @@ export function useUsers() {
       setError(null);
 
       try {
-        const q = new URLSearchParams();
-        // Always pass page and limit for proper pagination
-        q.set("page", String(p));
-        q.set("limit", String(l));
+        const response = await userAPI.getAllUsers({
+          ...appliedFilters,
+          page: p,
+          limit: l,
+        });
 
-        // Add role filter
-        if (appliedFilters.role) {
-          q.set("role", appliedFilters.role);
+        // Backend returns array directly or { users: [...] }
+        const usersArray = Array.isArray(response) ? response : (response.users || []);
+        
+        // Fetch orders to calculate order counts and total spend per user
+        let ordersData: any[] = [];
+        try {
+          // Use authorizedAPI to fetch orders from backend
+          const { authorizedAPI } = await import("@/lib/api");
+          const handleApiRequest = (await import("@/lib/handleApiRequest")).default;
+          const ordersRes = await handleApiRequest(() =>
+            authorizedAPI.get("/orders/admin/all")
+          );
+          ordersData = Array.isArray(ordersRes) ? ordersRes : ordersRes?.data || [];
+        } catch (e) {
+          console.error("Failed to fetch orders for user stats:", e);
         }
-
-        // Add filter parameters
-        if (appliedFilters.sortBy) {
-          q.set("sort", appliedFilters.sortBy);
-        }
-        if (appliedFilters.fromDate) {
-          q.set("from_date", appliedFilters.fromDate.toISOString());
-        }
-        if (appliedFilters.toDate) {
-          q.set("to_date", appliedFilters.toDate.toISOString());
-        }
-        if (appliedFilters.search) {
-          q.set("q", String(appliedFilters.search));
-        }
-        if (
-          appliedFilters.minOrders !== null &&
-          appliedFilters.minOrders !== undefined
-        ) {
-          q.set("min_orders", String(appliedFilters.minOrders));
-        }
-        if (
-          appliedFilters.maxOrders !== null &&
-          appliedFilters.maxOrders !== undefined
-        ) {
-          q.set("max_orders", String(appliedFilters.maxOrders));
-        }
-        if (
-          appliedFilters.minSpend !== null &&
-          appliedFilters.minSpend !== undefined
-        ) {
-          q.set("min_spend", String(appliedFilters.minSpend));
-        }
-        if (
-          appliedFilters.maxSpend !== null &&
-          appliedFilters.maxSpend !== undefined
-        ) {
-          q.set("max_spend", String(appliedFilters.maxSpend));
-        }
-
-        const qs = q.toString();
-        const url = `/api/admin/list-users${qs ? `?${qs}` : ""}`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const json = await res.json();
-          const apiUsers = (json.users || []).map((u: any) => ({
+        
+        // Calculate order counts and total spend per user
+        const userStats = new Map<string, { orderCount: number; totalSpend: number }>();
+        ordersData.forEach((order: any) => {
+          const userId = order.userId || order.user_id;
+          if (userId) {
+            const stats = userStats.get(userId) || { orderCount: 0, totalSpend: 0 };
+            stats.orderCount += 1;
+            stats.totalSpend += Number(order.total || 0);
+            userStats.set(userId, stats);
+          }
+        });
+        
+        const apiUsers = usersArray.map((u: any) => {
+          // Backend returns roles as array, map to single role for compatibility
+          const roles = u.roles || (u.role ? [u.role] : []);
+          const primaryRole = roles[0] || u.role || "user";
+          const stats = userStats.get(u.id) || { orderCount: 0, totalSpend: 0 };
+          
+          return {
             id: u.id,
             email: u.email || "",
-            full_name: u.full_name || "",
+            full_name: u.fullName || u.full_name || "",
             phone: u.phone || "",
-            created_at: u.created_at,
-            role: (u.role as AppRole) || "user",
-            orderCount: Number(u.order_count || 0),
-            totalSpend: Number(u.total_spend || 0),
-          }));
+            created_at: u.createdAt || u.created_at,
+            role: primaryRole as AppRole,
+            roles: roles, // Keep roles array for filtering
+            orderCount: stats.orderCount,
+            totalSpend: stats.totalSpend,
+          };
+        });
 
-          const apiCount =
-            typeof json.total_count === "number" ? json.total_count : null;
-          const apiFilteredCount =
-            typeof json.count === "number" ? json.count : null;
+        const apiCount =
+          typeof response.total_count === "number" ? response.total_count : null;
+        const apiFilteredCount =
+          typeof response.count === "number" ? response.count : null;
 
-          setUsers(apiUsers);
-          setTotalCount(apiCount ?? apiUsers.length);
-          setFilteredCount(apiFilteredCount ?? apiUsers.length);
+        setUsers(apiUsers);
+        setTotalCount(apiCount ?? apiUsers.length);
+        setFilteredCount(apiFilteredCount ?? apiUsers.length);
 
-          // Store role counts from API
-          if (json.role_counts) {
-            setRoleCounts(json.role_counts);
+        // Store role counts from API
+        if (response.role_counts) {
+          setRoleCounts(response.role_counts);
+        }
+        // Fallback: if API didn't provide a total_count, fetch unpaginated
+        // list to obtain the real total users count
+        if (apiCount === null) {
+          try {
+            const fullResponse = await userAPI.getAllUsers({});
+            const fullUsersArray = Array.isArray(fullResponse) ? fullResponse : (fullResponse.users || []);
+            setTotalCount(fullUsersArray.length);
+          } catch (e) {
+            // ignore fallback errors
           }
-          // Fallback: if API didn't provide a total_count, fetch unpaginated
-          // list to obtain the real total users count. This ensures the
-          // upper card shows an accurate total instead of a page-limited
-          // length (e.g. 50).
-          if (apiCount === null) {
-            try {
-              const fullRes = await fetch(`/api/admin/list-users`);
-              if (fullRes.ok) {
-                const fullJson = await fullRes.json();
-                if (typeof fullJson.total_count === "number") {
-                  setTotalCount(fullJson.total_count);
-                }
-              }
-            } catch (e) {
-              // ignore fallback errors
-            }
-          }
-        } else {
-          setError("Failed to fetch users");
-          setUsers([]);
-          setTotalCount(0);
-          setFilteredCount(0);
         }
       } catch (e: any) {
         setError(e.message || "Failed to fetch users");
@@ -260,15 +199,7 @@ export function useUsers() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/admin/update-user-role", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, role }),
-        });
-        if (!res.ok) {
-          const json = await res.json();
-          throw new Error(json.error || "Failed to update role");
-        }
+        await userAPI.updateUserRole(userId, role);
         await fetchUsers(page, limit, filters);
       } catch (err: any) {
         setError(err.message || "Failed to update role");
@@ -279,21 +210,13 @@ export function useUsers() {
     [fetchUsers, page, limit, filters]
   );
 
-  // Delete user (soft delete by disabling or hard delete)
+  // Delete user (hard delete - backend doesn't support soft delete)
   const deleteUser = useCallback(
     async (userId: string, hardDelete = false) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/admin/delete-user", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, hardDelete }),
-        });
-        if (!res.ok) {
-          const json = await res.json();
-          throw new Error(json.error || "Failed to delete user");
-        }
+        await userAPI.deleteUser(userId);
         await fetchUsers(page, limit, filters);
       } catch (err: any) {
         setError(err.message || "Failed to delete user");

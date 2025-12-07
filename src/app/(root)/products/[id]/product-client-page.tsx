@@ -71,6 +71,12 @@ export default function ProductClientPage({
 
    const { product, variations, images, similarProducts } = data;
 
+   // Use description as-is from backend (already processed)
+   // Memoize to prevent unnecessary re-renders and hydration issues
+   const descriptionHtml = useMemo(() => {
+      return product.description || "No description available.";
+   }, [product.description]);
+
    useEffect(() => {
       const getUser = async () => {
          const {
@@ -738,9 +744,9 @@ export default function ProductClientPage({
             <TabsContent value="description" className="mt-8">
               <Card>
                 <CardContent
-                  className="p-6 prose max-w-none prose-p:my-2 prose-h3:mb-2 prose-h3:mt-4"
+                  className="p-6 prose max-w-none prose-p:my-2 prose-h3:mb-2 prose-h3:mt-4 prose-img:max-w-full prose-img:rounded-lg prose-img:my-4"
                   dangerouslySetInnerHTML={{
-                    __html: product.description || "No description available.",
+                    __html: descriptionHtml,
                   }}
                 />
               </Card>

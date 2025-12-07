@@ -67,10 +67,17 @@ export default function ExternalOrdersPage() {
    const [page, setPage] = useState(1);
    const [limit, setLimit] = useState(50);
 
+   // Fetch paginated orders for the table
    const { data: ordersResponse, isLoading } = useAllOrders({
       filters: { isExternal: true, search: search || undefined },
       pagination: { page, limit },
       sort: { column: "created_at", direction: "desc" },
+   });
+
+   // Fetch all external orders (without pagination) for accurate metrics
+   const { data: allExternalOrdersResponse } = useAllOrders({
+      filters: { isExternal: true },
+      // No pagination to get all external orders for metrics
    });
 
    const totalCount = ordersResponse?.count || 0;
@@ -353,23 +360,24 @@ export default function ExternalOrdersPage() {
 
             {/* External orders metrics (improved) */}
             <div className="mb-6">
-               {/* Build metrics from fetched orders */}
+               {/* Build metrics from all external orders (not just paginated) */}
                {(() => {
-                  const list = (ordersResponse?.data || []) as Order[];
-                  const total = list.length;
-                  const pending = list.filter(
+                  // Use all external orders for metrics, not just the current page
+                  const allExternalOrders = (allExternalOrdersResponse?.data || []) as Order[];
+                  const total = allExternalOrders.length;
+                  const pending = allExternalOrders.filter(
                      (o) => o.status === "pending"
                   ).length;
-                  const processing = list.filter(
+                  const processing = allExternalOrders.filter(
                      (o) => o.status === "processing"
                   ).length;
-                  const delivered = list.filter(
+                  const delivered = allExternalOrders.filter(
                      (o) => o.status === "delivered"
                   ).length;
-                  const shipped = list.filter(
+                  const shipped = allExternalOrders.filter(
                      (o) => o.status === "shipped"
                   ).length;
-                  const cancelled = list.filter(
+                  const cancelled = allExternalOrders.filter(
                      (o) => o.status === "cancelled"
                   ).length;
 

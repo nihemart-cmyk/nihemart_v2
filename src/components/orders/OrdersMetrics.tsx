@@ -38,7 +38,9 @@ export default function OrdersMetrics() {
       isError,
       error,
       refetch,
-   } = useAllOrders();
+   } = useAllOrders({
+      // Show all orders (both external and non-external) in metrics
+   });
 
    // Calculate metrics from actual orders data
    const getOrderMetrics = (): OrderMetric[] => {

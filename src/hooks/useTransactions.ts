@@ -1,13 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  fetchAllTransactions,
-  getTransactionStats,
-  fetchTransactionById,
-  type TransactionQueryOptions,
-  type Transaction,
-  type TransactionStats,
-} from "@/integrations/supabase/transactions";
+import type { TransactionQueryOptions, Transaction, TransactionStats } from "@/integrations/supabase/transactions";
 
 // Query Keys
 export const transactionKeys = {
@@ -26,9 +19,23 @@ export function useTransactions(options: TransactionQueryOptions = {}) {
 
   return useQuery({
     queryKey: transactionKeys.list(options),
-    queryFn: () => {
-      console.log("Executing fetchAllTransactions with options:", options);
-      return fetchAllTransactions(options);
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (options.page) params.append("page", String(options.page));
+      if (options.limit) params.append("limit", String(options.limit));
+      if (options.status) params.append("status", options.status);
+      if (options.payment_method) params.append("payment_method", options.payment_method);
+      if (options.search) params.append("search", options.search);
+      if (options.sortBy) params.append("sortBy", options.sortBy);
+      if (options.sortOrder) params.append("sortOrder", options.sortOrder);
+      if (options.startDate) params.append("startDate", options.startDate);
+      if (options.endDate) params.append("endDate", options.endDate);
+
+      const response = await fetch(`/api/admin/transactions?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch transactions");
+      }
+      return response.json();
     },
     enabled: !!user && hasRole("admin"),
     staleTime: 1000 * 60 * 2, // 2 minutes
@@ -41,7 +48,13 @@ export function useTransactionStats() {
 
   return useQuery({
     queryKey: transactionKeys.stats(),
-    queryFn: getTransactionStats,
+    queryFn: async () => {
+      const response = await fetch("/api/admin/transactions/stats");
+      if (!response.ok) {
+        throw new Error("Failed to fetch transaction statistics");
+      }
+      return response.json();
+    },
     enabled: !!user && hasRole("admin"),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
@@ -71,7 +84,16 @@ export function useTransaction(id: string) {
 
   return useQuery({
     queryKey: transactionKeys.detail(id),
-    queryFn: () => fetchTransactionById(id),
+    queryFn: async () => {
+      // For now, fetch from transactions list and filter by ID
+      // Or use a dedicated endpoint if available
+      const response = await fetch(`/api/admin/transactions?search=${id}&limit=1`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch transaction");
+      }
+      const data = await response.json();
+      return data.transactions?.[0] || null;
+    },
     enabled: !!user && hasRole("admin") && !!id,
   });
 }

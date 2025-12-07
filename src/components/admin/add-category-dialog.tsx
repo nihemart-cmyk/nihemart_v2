@@ -24,7 +24,7 @@ import {
 import {
    createCategory,
    updateCategory,
-} from "@/integrations/supabase/categories";
+} from "@/lib/api/categories";
 import {
    fetchSubcategories,
    createSubcategory,
@@ -45,7 +45,7 @@ import {
    AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { Category } from "@/integrations/supabase/categories";
+import type { Category } from "@/lib/api/categories";
 import type { Subcategory } from "@/integrations/supabase/subcategories";
 
 const categorySchema = z.object({
@@ -73,7 +73,7 @@ const uploadFileToBucket = async (
    };
    
    const category = categoryMap[bucket] || "general";
-   return uploadFile(file, category);
+   return uploadFile(file, category, bucket === "category-images" ? "category" : undefined);
 };
 
 interface SelectedImage {

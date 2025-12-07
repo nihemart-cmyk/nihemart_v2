@@ -19,7 +19,7 @@ import {
 import { Area, AreaChart, CartesianGrid, XAxis, Bar, BarChart } from 'recharts'
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { fetchProductsForStockManagement } from '@/integrations/supabase/stock'
+import { fetchProductsForStockManagement } from '@/lib/api/stock'
 import { useOrders } from '@/hooks/useOrders'
 import { useRouter } from 'next/navigation'
 

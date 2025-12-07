@@ -34,6 +34,14 @@ export async function uploadFile(
   } else if (category === "directorate") {
     endpoint = "/uploads/directorates";
     formData.append("file", file);
+  } else if (category === "general") {
+    // Check if this is a category image upload
+    if (entityType === "category") {
+      endpoint = "/uploads/categories";
+    } else {
+      endpoint = "/uploads";
+    }
+    formData.append("file", file);
   } else {
     formData.append("file", file);
   }

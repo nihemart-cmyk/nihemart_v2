@@ -234,81 +234,17 @@ export default function useSubmitOrder(args: any) {
                         setOrderItems && setOrderItems([]);
 
                         try {
-                           let linkSucceeded = false;
+                           // Payment-order linking is handled automatically by the backend
+                           // when creating orders from payment sessions, so no manual linking needed
+                           // Clean up session storage reference if present
                            const ref =
                               typeof window !== "undefined"
                                  ? sessionStorage.getItem("kpay_reference")
                                  : null;
-                           if (!ref) linkSucceeded = true;
-                           else {
+                           if (ref) {
                               try {
-                                 const linkResp = await fetch(
-                                    "/api/payments/link",
-                                    {
-                                       method: "POST",
-                                       headers: {
-                                          "Content-Type": "application/json",
-                                       },
-                                       body: JSON.stringify({
-                                          orderId: created.id,
-                                          reference: ref,
-                                       }),
-                                    }
-                                 );
-                                 if (linkResp.ok) linkSucceeded = true;
-                                 else {
-                                    const linkErr = await linkResp
-                                       .json()
-                                       .catch(() => ({}));
-                                    try {
-                                       const statusResp = await fetch(
-                                          "/api/payments/kpay/status",
-                                          {
-                                             method: "POST",
-                                             headers: {
-                                                "Content-Type":
-                                                   "application/json",
-                                             },
-                                             body: JSON.stringify({
-                                                reference: ref,
-                                             }),
-                                          }
-                                       );
-                                       if (statusResp.ok) {
-                                          const statusData =
-                                             await statusResp.json();
-                                          const payId = statusData?.paymentId;
-                                          if (payId) {
-                                             const patchResp = await fetch(
-                                                `/api/payments/${payId}`,
-                                                {
-                                                   method: "PATCH",
-                                                   headers: {
-                                                      "Content-Type":
-                                                         "application/json",
-                                                   },
-                                                   body: JSON.stringify({
-                                                      order_id: created.id,
-                                                   }),
-                                                }
-                                             );
-                                             if (patchResp.ok)
-                                                linkSucceeded = true;
-                                          }
-                                       }
-                                    } catch (fbe) {
-                                       console.error(
-                                          "Fallback linking path failed",
-                                          fbe
-                                       );
-                                    }
-                                 }
-                              } catch (linkErr) {
-                                 console.error(
-                                    "Error linking payment via reference",
-                                    linkErr
-                                 );
-                              }
+                                 sessionStorage.removeItem("kpay_reference");
+                              } catch (e) {}
                            }
 
                            try {
@@ -586,154 +522,169 @@ export default function useSubmitOrder(args: any) {
                   }
                }
 
-               // For new payments: Create order FIRST, then initiate payment
+               // NEW FLOW: Initiate payment FIRST with orderData, order will be created after payment succeeds
                setSuppressEmptyCartRedirect && setSuppressEmptyCartRedirect(true);
                setPaymentInProgress && setPaymentInProgress(true);
                
-               createOrder.mutate(orderData, {
-                  onSuccess: async (createdOrder: any) => {
-                     const created =
-                        createdOrder && createdOrder.order
-                           ? createdOrder.order
-                           : createdOrder;
-                     
-                     try {
-                        const customerPhone =
-                           args.paymentMethod === "mtn_momo" ||
-                           args.paymentMethod === "airtel_money"
-                              ? mobileMoneyPhones[args.paymentMethod] ||
-                                formatPhoneNumber(
-                                   args.selectedAddress?.phone || formData.phone || ""
-                                )
-                              : formatPhoneNumber(
-                                   args.selectedAddress?.phone || formData.phone || ""
-                                );
+               try {
+                  const customerPhone =
+                     args.paymentMethod === "mtn_momo" ||
+                     args.paymentMethod === "airtel_money"
+                        ? mobileMoneyPhones[args.paymentMethod] ||
+                          formatPhoneNumber(
+                             args.selectedAddress?.phone || formData.phone || ""
+                          )
+                        : formatPhoneNumber(
+                             args.selectedAddress?.phone || formData.phone || ""
+                          );
 
-                        const derivedFullName =
-                           (user &&
-                              user.user_metadata &&
-                              user.user_metadata.full_name &&
-                              user.user_metadata.full_name.trim()) ||
-                           `${formData.fullName || ""}`.trim();
+                  const derivedFullName =
+                     (user &&
+                        user.user_metadata &&
+                        user.user_metadata.full_name &&
+                        user.user_metadata.full_name.trim()) ||
+                     `${formData.fullName || ""}`.trim();
 
-                        const paymentCustomerName =
-                           derivedFullName || formData.fullName || "Guest Customer";
-                        const paymentCustomerEmail = (formData.email || "").trim();
+                  const paymentCustomerName =
+                     derivedFullName || formData.fullName || "Guest Customer";
+                  const paymentCustomerEmail = (formData.email || "").trim();
 
-                        const paymentRequest: any = {
-                           orderId: created.id,
-                           amount: total,
-                           customerName: paymentCustomerName,
-                           customerEmail: paymentCustomerEmail,
-                           customerPhone,
-                           paymentMethod: args.paymentMethod,
-                           redirectUrl: `${window.location.origin}/payment/${created.id}`,
-                        };
+                  // Send orderData instead of orderId - order will be created after payment succeeds
+                  // For card payments, we'll redirect to KPay, then KPay will redirect back to our payment page
+                  // The backend will set redirectUrl with the actual reference
+                  const paymentRequest: any = {
+                     orderData: orderData, // Send full order data
+                     amount: total,
+                     customerName: paymentCustomerName,
+                     customerEmail: paymentCustomerEmail,
+                     customerPhone,
+                     customerNumber: customerPhone,
+                     paymentMethod: args.paymentMethod,
+                     // Don't send redirectUrl - backend will generate it with the actual reference
+                     // redirectUrl will be set by backend to point back to payment page with reference
+                     orderDetails: `Order for ${paymentCustomerName}`,
+                  };
 
-                        console.log("[useSubmitOrder] Initiating payment for order:", {
-                           orderId: created.id,
-                           paymentMethod: paymentRequest.paymentMethod,
-                           amount: paymentRequest.amount,
-                        });
+                  console.log("[useSubmitOrder] Initiating payment with orderData (order will be created after payment):", {
+                     paymentMethod: paymentRequest.paymentMethod,
+                     amount: paymentRequest.amount,
+                     hasOrderData: !!paymentRequest.orderData,
+                  });
 
-                        const validationErrors = validatePaymentRequest
-                           ? validatePaymentRequest(paymentRequest)
-                           : [];
-                        if (validationErrors.length > 0) {
-                           setPaymentInProgress && setPaymentInProgress(false);
-                           setIsSubmitting && setIsSubmitting(false);
-                           toast.error(
-                              `Payment validation failed: ${validationErrors[0]}`
-                           );
-                           return;
-                        }
-
-                        const paymentResult = await initiatePayment(paymentRequest);
-
-                        if (paymentResult.success) {
-                           toast.success("Redirecting to payment gateway...");
-
-                           const ref =
-                              paymentResult.reference ||
-                              paymentResult.data?.reference ||
-                              null;
-                           if (ref) {
-                              try {
-                                 sessionStorage.setItem(
-                                    "kpay_reference",
-                                    String(ref)
-                                 );
-                              } catch (e) {}
-                           }
-
-                           const checkoutUrl =
-                              paymentResult.checkoutUrl ||
-                              paymentResult.data?.url ||
-                              paymentResult.data?.redirecturl;
-                           
-                           if (checkoutUrl) {
-                              window.location.href = String(checkoutUrl);
-                              return;
-                           }
-
-                           const paymentId =
-                              paymentResult.paymentId ||
-                              paymentResult.data?.paymentId ||
-                              paymentResult.sessionId;
-                           
-                           if (paymentId) {
-                              try {
-                                 router.push(`/payment/${paymentId}`);
-                                 return;
-                              } catch (e) {
-                                 window.location.href = `${window.location.origin}/payment/${paymentId}`;
-                                 return;
-                              }
-                           }
-
-                           // Fallback: redirect to order page
-                           navigatedToOrder = true;
-                           router.push(`/orders/${created.id}`);
-                        } else {
-                           setPaymentInProgress && setPaymentInProgress(false);
-                           setIsSubmitting && setIsSubmitting(false);
-                           toast.error(
-                              `Payment initiation failed: ${
-                                 paymentResult.error || "Unknown error"
-                              }`
-                           );
-                           // Still redirect to order page so user can retry
-                           navigatedToOrder = true;
-                           router.push(`/orders/${created.id}`);
-                        }
-                     } catch (err: any) {
-                        console.error("Payment initiation failed:", err);
-                        setPaymentInProgress && setPaymentInProgress(false);
-                        setIsSubmitting && setIsSubmitting(false);
-                        toast.error(err?.message || "Failed to start payment. Please try again.");
-                        // Still redirect to order page so user can retry
-                        navigatedToOrder = true;
-                        router.push(`/orders/${created.id}`);
-                     }
-                  },
-                  onError: (error: any) => {
-                     console.error("createOrder.onError", error);
+                  const validationErrors = validatePaymentRequest
+                     ? validatePaymentRequest(paymentRequest)
+                     : [];
+                  if (validationErrors.length > 0) {
                      setPaymentInProgress && setPaymentInProgress(false);
                      setIsSubmitting && setIsSubmitting(false);
                      toast.error(
-                        `Failed to create order: ${
-                           error?.message || "Unknown error"
+                        `Payment validation failed: ${validationErrors[0]}`
+                     );
+                     return;
+                  }
+
+                  const paymentResult = await initiatePayment(paymentRequest);
+
+                  if (paymentResult.success) {
+                     toast.success("Redirecting to payment gateway...");
+
+                     // Get the payment session reference
+                     const ref =
+                        paymentResult.reference ||
+                        paymentResult.data?.reference ||
+                        paymentResult.sessionId ||
+                        null;
+                     
+                     if (ref) {
+                        try {
+                           sessionStorage.setItem(
+                              "kpay_reference",
+                              String(ref)
+                           );
+                        } catch (e) {}
+                     }
+
+                     // First try to redirect to external checkout URL if available
+                     // For card payments, this is critical - we must redirect to KPay checkout
+                     const checkoutUrl =
+                        paymentResult.checkoutUrl ||
+                        paymentResult.data?.url ||
+                        paymentResult.data?.redirecturl ||
+                        paymentResult.data?.redirectUrl ||
+                        paymentResult.data?.checkout_url ||
+                        null;
+                     
+                     console.log("[useSubmitOrder] Payment result:", {
+                        success: paymentResult.success,
+                        checkoutUrl: checkoutUrl || "NOT_FOUND",
+                        hasData: !!paymentResult.data,
+                        dataUrl: paymentResult.data?.url,
+                        reference: ref,
+                     });
+                     
+                     // For card payments, always redirect to checkout URL if available
+                     // For mobile money, redirect to our payment page
+                     const isCardPayment = 
+                        args.paymentMethod === "visa_card" || 
+                        args.paymentMethod === "mastercard" || 
+                        args.paymentMethod?.includes("card");
+                     
+                     if (checkoutUrl) {
+                        console.log("[useSubmitOrder] Redirecting to KPay checkout:", checkoutUrl);
+                        // Store reference for when user returns from KPay
+                        if (ref) {
+                           try {
+                              sessionStorage.setItem("kpay_reference", String(ref));
+                           } catch (e) {
+                              console.warn("[useSubmitOrder] Failed to store reference:", e);
+                           }
+                        }
+                        window.location.href = String(checkoutUrl);
+                        return;
+                     }
+                     
+                     // For card payments, if no checkout URL, this is an error
+                     if (isCardPayment) {
+                        console.error("[useSubmitOrder] Card payment initiated but no checkout URL found in response:", paymentResult);
+                        setPaymentInProgress && setPaymentInProgress(false);
+                        setIsSubmitting && setIsSubmitting(false);
+                        toast.error("Payment initiated but checkout URL not available. Please contact support.");
+                        return;
+                     }
+
+                     // For mobile money payments, redirect to our payment page using the reference
+                     if (ref) {
+                        try {
+                           router.push(`/payment/${ref}`);
+                           return;
+                        } catch (e) {
+                           window.location.href = `${window.location.origin}/payment/${ref}`;
+                           return;
+                        }
+                     }
+
+                     // Fallback: show error
+                     setPaymentInProgress && setPaymentInProgress(false);
+                     setIsSubmitting && setIsSubmitting(false);
+                     toast.error("Payment initiated but no redirect URL available. Please check your payment status.");
+                  } else {
+                     setPaymentInProgress && setPaymentInProgress(false);
+                     setIsSubmitting && setIsSubmitting(false);
+                     toast.error(
+                        `Payment initiation failed: ${
+                           paymentResult.error || "Unknown error"
                         }`
                      );
-                  },
-                  onSettled: () => {
-                     setIsSubmitting && setIsSubmitting(false);
-                     if (!navigatedToOrder) {
-                        setSuppressEmptyCartRedirect &&
-                           setSuppressEmptyCartRedirect(false);
-                     }
-                  },
-               });
+                  }
+               } catch (err: any) {
+                  console.error("Payment initiation failed:", err);
+                  setPaymentInProgress && setPaymentInProgress(false);
+                  setIsSubmitting && setIsSubmitting(false);
+                  toast.error(err?.message || "Failed to start payment. Please try again.");
+               } finally {
+                  setIsSubmitting && setIsSubmitting(false);
+                  setSuppressEmptyCartRedirect && setSuppressEmptyCartRedirect(false);
+               }
                return;
             }
 

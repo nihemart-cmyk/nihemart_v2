@@ -111,7 +111,8 @@ const TransactionsTable: FC<TransactionsTableProps> = () => {
         return 0;
     }
   }
-  if (error) {
+  // Don't show error if we have empty data - just show empty state
+  if (error && (!data || transactions.length === 0)) {
     return (
       <div className='p-5 rounded-2xl bg-white mt-10'>
         <div className="text-center py-10">

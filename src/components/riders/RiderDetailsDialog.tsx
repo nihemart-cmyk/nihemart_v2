@@ -51,13 +51,10 @@ export default function RiderDetailsDialog({
       setError(null);
       (async () => {
          try {
-            const res = await fetch(
-               `/api/admin/rider-details?rid=${encodeURIComponent(riderId)}`
-            );
-            const j = await res.json();
-            if (!res.ok) throw new Error(j.error || "Failed to load");
-            setRider(j.rider);
-            setAssignments(j.assignments || []);
+            const { authorizedAPI } = await import("@/lib/api");
+            const res = await authorizedAPI.get(`/riders/${riderId}/details?limit=20`);
+            setRider(res.rider);
+            setAssignments(res.assignments || []);
          } catch (e: any) {
             setError(e?.message || String(e));
          } finally {
@@ -179,7 +176,7 @@ export default function RiderDetailsDialog({
                   <div className="flex items-center justify-between">
                      <UserAvatarProfile
                         user={{
-                           fullName: rider.full_name || "Unnamed",
+                           fullName: rider.fullName || rider.full_name || "Unnamed",
                            subTitle: rider.phone || rider.vehicle || "",
                            imageUrl: rider.image_url || undefined,
                         }}

@@ -31,7 +31,7 @@ import {
   Minus,
   Package,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, optimizeImageUrl } from "@/lib/utils";
 import {
   fetchProductsForStockManagement,
   fetchStockHistory,
@@ -40,7 +40,7 @@ import {
   fetchProductStockHistory,
   StockProduct,
   StockHistoryItem,
-} from "@/integrations/supabase/stock";
+} from "@/lib/api/stock";
 import { fetchCategories } from "@/lib/api/products";
 import {
   Dialog,
@@ -412,7 +412,7 @@ function StockTable({
             sku: null,
             barcode: null,
             category: product.category,
-            mainImageUrl: product.main_image_url,
+            mainImageUrl: optimizeImageUrl(product.mainImageUrl || product.main_image_url, { width: 80, quality: 75 }),
           });
         });
       } else {
@@ -429,7 +429,7 @@ function StockTable({
           sku: null,
           barcode: null,
           category: product.category,
-          mainImageUrl: product.main_image_url,
+          mainImageUrl: optimizeImageUrl(product.mainImageUrl || product.main_image_url, { width: 80, quality: 75 }),
         });
       }
     });
@@ -717,13 +717,15 @@ function StockTable({
                               const product = products.find(
                                 (p) => p.id === item.productId
                               );
-                              return product?.main_image_url ? (
+                              const imageUrl = product?.mainImageUrl || product?.main_image_url;
+                              return imageUrl ? (
                                 <Image
-                                  src={product.main_image_url}
+                                  src={optimizeImageUrl(imageUrl, { width: 40, height: 40, quality: 75 })}
                                   alt={item.productName}
                                   width={40}
                                   height={40}
                                   className="w-full h-full object-cover"
+                                  unoptimized={true}
                                 />
                               ) : (
                                 <Package className="w-6 h-6 text-gray-400" />

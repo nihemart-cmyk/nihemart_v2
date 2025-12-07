@@ -3,15 +3,18 @@ import { toast } from "sonner";
 import { PAYMENT_METHODS } from "@/lib/services/kpay";
 
 export interface PaymentInitiationRequest {
-   // orderId is optional now; callers can initiate a payment session by providing a cart snapshot instead
+   // orderId is optional now; callers can initiate a payment session by providing orderData or cart snapshot instead
    orderId?: string;
+   // Full order data to create after payment succeeds (new flow)
+   orderData?: any;
    amount: number;
    customerName: string;
    customerEmail: string;
    customerPhone: string;
    paymentMethod: keyof typeof PAYMENT_METHODS;
-   redirectUrl: string;
-   // Optional cart snapshot for session-based payments
+   // redirectUrl is optional - backend will generate it if not provided
+   redirectUrl?: string;
+   // Optional cart snapshot for session-based payments (legacy)
    cart?: any;
 }
 
@@ -271,10 +274,10 @@ export function useKPayPayment() {
       (request: PaymentInitiationRequest): string[] => {
          const errors: string[] = [];
 
-         // Either an orderId (order-based payment) or a cart snapshot (session-based payment)
-         if (!request.orderId && !request.cart) {
+         // Either an orderId (legacy order-based payment), orderData (new flow), or a cart snapshot (session-based payment)
+         if (!request.orderId && !request.orderData && !request.cart) {
             errors.push(
-               "Either Order ID or cart snapshot is required to initiate a payment"
+               "Either Order ID, order data, or cart snapshot is required to initiate a payment"
             );
          }
 
@@ -307,9 +310,11 @@ export function useKPayPayment() {
             errors.push("Invalid payment method");
          }
 
-         if (!request.redirectUrl?.trim()) {
-            errors.push("Redirect URL is required");
-         }
+         // redirectUrl is optional - backend will generate it if not provided
+         // Only validate if explicitly provided (for backward compatibility)
+         // if (request.redirectUrl && !request.redirectUrl.trim()) {
+         //    errors.push("Redirect URL must be a valid URL if provided");
+         // }
 
          return errors;
       },

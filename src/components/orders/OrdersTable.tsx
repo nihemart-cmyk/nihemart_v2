@@ -101,7 +101,7 @@ const OrdersTable: FC<OrdersTableProps> = () => {
          ? undefined
          : (statusFilter.toLowerCase() as OrderStatus);
 
-   // Query options
+   // Query options - show all orders (both external and non-external)
    const queryOptions = {
       filters: {
          search: search || undefined,
@@ -112,6 +112,7 @@ const OrdersTable: FC<OrdersTableProps> = () => {
          priceMax: priceRange.max,
          city: selectedCity,
          isPaid: showPaid,
+         // Removed isExternal filter to show all orders
       },
       pagination: { page, limit },
       sort,

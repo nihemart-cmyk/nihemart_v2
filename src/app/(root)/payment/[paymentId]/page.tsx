@@ -52,7 +52,28 @@ export default function PaymentPage() {
    const searchParams = useSearchParams();
    const { checkPaymentStatus, isCheckingStatus } = useKPayPayment();
 
-   const paymentId = params?.paymentId as string;
+   const rawPaymentId = params?.paymentId as string;
+   // Sanitize paymentId: handle cases where it might be the string "null" or "undefined"
+   // Also decode URL-encoded values (e.g., %7Breference%7D becomes {reference})
+   let decodedPaymentId = rawPaymentId;
+   try {
+      if (rawPaymentId) {
+         decodedPaymentId = decodeURIComponent(rawPaymentId);
+      }
+   } catch (e) {
+      // If decoding fails, use original
+      decodedPaymentId = rawPaymentId;
+   }
+   
+   const paymentId = 
+      decodedPaymentId && 
+      decodedPaymentId !== "null" && 
+      decodedPaymentId !== "undefined" && 
+      decodedPaymentId !== "{reference}" &&
+      decodedPaymentId.trim() !== ""
+         ? decodedPaymentId
+         : null;
+   
    const orderId = searchParams?.get("orderId");
    // Sanitize orderId: some flows may include the literal string 'null'
    // (for example when building URLs from nullable values). Treat
@@ -89,14 +110,44 @@ export default function PaymentPage() {
             body: JSON.stringify({ reference: ref }),
          });
 
-         if (!finResp.ok) return;
+         if (!finResp.ok) {
+            const errorData = await finResp.json().catch(() => ({}));
+            console.error("[finalizeAndMaybeCreateOrder] Finalize failed:", errorData);
+            toast.error("Failed to finalize payment. Please try again.");
+            return;
+         }
+         
          const finData = await finResp.json();
 
+         // Backend's checkPaymentStatus should have created the order if payment was successful
          if (finData?.success && finData.orderId) {
-            router.push(`/orders/${finData.orderId}`);
+            // Order was created by backend, redirect to appropriate page
+            try {
+               // Clean up storage
+               try {
+                  localStorage.removeItem("nihemart_checkout_v1");
+               } catch (e) {}
+               try {
+                  sessionStorage.removeItem("kpay_reference");
+               } catch (e) {}
+               try {
+                  clearCart();
+               } catch (e) {}
+            } catch (e) {
+               console.warn("Failed to clean up storage:", e);
+            }
+
+            // Redirect based on user authentication status
+            if (user && user.id) {
+               router.push(`/orders/${finData.orderId}`);
+            } else {
+               router.push(`/thank-you`);
+            }
             return;
          }
 
+         // If order wasn't created but payment is completed, try fallback creation from localStorage
+         // This should rarely happen if backend is working correctly
          if (finData?.success && finData.canCreateOrder) {
             // Load persisted checkout snapshot
             const loadCheckoutFromStorage = () => {
@@ -174,21 +225,8 @@ export default function PaymentPage() {
                createOrder.mutate(orderPayload, {
                   onSuccess: async (createdOrder: any) => {
                      try {
-                        // Attempt to link payment to order
-                        let linkSucceeded = false;
-                        try {
-                           const linkResp = await fetch("/api/payments/link", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                 orderId: createdOrder.id,
-                                 reference: ref,
-                              }),
-                           });
-                           if (linkResp.ok) linkSucceeded = true;
-                        } catch (e) {
-                           console.error("Link error after auto-create:", e);
-                        }
+                        // Payment-order linking is handled automatically by the backend
+                        // when creating orders from payment sessions, so no manual linking needed
 
                         try {
                            localStorage.removeItem("nihemart_checkout_v1");
@@ -237,6 +275,24 @@ export default function PaymentPage() {
 
    // Fetch payment data
    const fetchPaymentData = async () => {
+      // If paymentId is invalid, try to get reference from sessionStorage
+      if (!paymentId) {
+         try {
+            const ref = sessionStorage.getItem("kpay_reference");
+            if (ref && ref !== "null" && ref !== "undefined") {
+               console.log("[PaymentPage] No paymentId in URL, using reference from sessionStorage:", ref);
+               // Redirect to the correct URL with the reference
+               router.replace(`/payment/${ref}`);
+               return;
+            }
+         } catch (e) {
+            console.error("[PaymentPage] Failed to get reference from sessionStorage:", e);
+         }
+         setError("Invalid payment ID. Please return to checkout and try again.");
+         setLoading(false);
+         return;
+      }
+
       try {
          const response = await fetch(`/api/payments/${paymentId}`);
          if (!response.ok) {
@@ -244,6 +300,66 @@ export default function PaymentPage() {
          }
          const data = await response.json();
          setPayment(data);
+
+         // For card payments, if checkout URL is available and payment is pending/initiated, redirect immediately
+         const isCardPayment = 
+            data.payment_method === "visa_card" || 
+            data.payment_method === "mastercard" ||
+            data.payment_method?.includes("card");
+         
+         const isPendingStatus = data.status === "pending" || data.status === "initiated";
+         
+         if (isCardPayment && data.checkout_url && isPendingStatus) {
+            console.log("[PaymentPage] Card payment detected, redirecting to KPay checkout:", data.checkout_url);
+            // Store the reference so we can return to this page after payment
+            try {
+               if (data.reference) {
+                  sessionStorage.setItem("kpay_reference", data.reference);
+               }
+            } catch (e) {
+               console.warn("[PaymentPage] Failed to store reference:", e);
+            }
+            // Redirect to KPay - they will redirect back to redirectUrl (which points to this page)
+            window.location.href = data.checkout_url;
+            return; // Don't continue processing, we're redirecting
+         }
+         
+         // If returning from KPay and payment is completed, check if order exists
+         // Check URL params for KPay return indicators
+         const urlParams = new URLSearchParams(window.location.search);
+         const isKPayReturn = urlParams.has("refid") || urlParams.has("tid") || urlParams.has("statusid");
+         
+         if (isKPayReturn && (data.status === "completed" || data.status === "successful")) {
+            console.log("[PaymentPage] Detected return from KPay with completed payment");
+            // Immediately check status to ensure we have latest data
+            if (data.reference) {
+               try {
+                  const statusResult = await checkPaymentStatus({
+                     reference: data.reference,
+                     transactionId: data.kpay_transaction_id,
+                  });
+                  
+                  if (statusResult.success && (statusResult.status === "completed" || statusResult.status === "successful")) {
+                     // Payment is confirmed, check if order was created
+                     if (!data.order_id) {
+                        // Try to finalize and create order
+                        await finalizeAndMaybeCreateOrder(data.reference);
+                        return;
+                     } else {
+                        // Order exists, redirect to order page
+                        if (user && user.id) {
+                           router.push(`/orders/${data.order_id}`);
+                        } else {
+                           router.push(`/thank-you`);
+                        }
+                        return;
+                     }
+                  }
+               } catch (e) {
+                  console.error("[PaymentPage] Failed to check status after KPay return:", e);
+               }
+            }
+         }
 
          if (data.status === "completed" || data.status === "successful") {
             setPaymentCompleted(true);
@@ -269,7 +385,15 @@ export default function PaymentPage() {
    // Check payment status periodically (interval configured elsewhere)
    const checkStatus = async () => {
       if (!payment || paymentCompleted || loading) return;
-      if (stoppedPolling || timeoutReportedRef.current) return;
+      // CRITICAL: Stop polling immediately if timeout was reported or polling was stopped
+      if (stoppedPolling || timeoutReportedRef.current) {
+         // Clear any intervals if they're still running
+         if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current as unknown as number);
+            pollingIntervalRef.current = null;
+         }
+         return;
+      }
       // Throttle: ensure at most one status check every 30s regardless of callers
       const now = Date.now();
       if (now - lastStatusCheckRef.current < 29500) return;
@@ -284,6 +408,16 @@ export default function PaymentPage() {
          payment.status === "cancelled"
       ) {
          setStoppedPolling(true);
+         timeoutReportedRef.current = true;
+         // Clear intervals immediately
+         if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current as unknown as number);
+            pollingIntervalRef.current = null;
+         }
+         if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current as unknown as number);
+            countdownIntervalRef.current = null;
+         }
          return;
       }
 
@@ -353,198 +487,8 @@ export default function PaymentPage() {
 
                // Attempt to finalize and auto-create the order here so the
                // user does not get redirected back to the checkout page.
-               try {
-                  const ref = payment.reference;
-                  // Call finalize to ensure payment is reconciled
-                  const finResp = await fetch(`/api/payments/kpay/finalize`, {
-                     method: "POST",
-                     headers: { "Content-Type": "application/json" },
-                     body: JSON.stringify({ reference: ref }),
-                  });
-
-                  if (finResp.ok) {
-                     const finData = await finResp.json();
-                     if (finData?.success && finData.orderId) {
-                        // Webhook already created the order
-                        router.push(`/orders/${finData.orderId}`);
-                        return;
-                     }
-
-                     if (finData?.success && finData.canCreateOrder) {
-                        // Auto-create order using persisted checkout snapshot
-
-                        const loadCheckoutFromStorage = () => {
-                           try {
-                              if (typeof window === "undefined") return null;
-                              const raw = localStorage.getItem(
-                                 "nihemart_checkout_v1"
-                              );
-                              if (!raw) return null;
-                              return JSON.parse(raw);
-                           } catch (e) {
-                              return null;
-                           }
-                        };
-
-                        const snapshot = loadCheckoutFromStorage() || null;
-
-                        const cartItems = (
-                           snapshot &&
-                           snapshot.cart &&
-                           Array.isArray(snapshot.cart)
-                              ? snapshot.cart
-                              : []
-                        ) as any[];
-
-                        const subtotal = cartItems.reduce(
-                           (sum, it) =>
-                              sum +
-                              (Number(it.price) || 0) *
-                                 (Number(it.quantity) || 0),
-                           0
-                        );
-
-                        const transport = 2000; // fallback transport if missing
-                        const total = subtotal + transport;
-
-                        const derivedFullName =
-                           (snapshot?.formData?.firstName || "") +
-                           " " +
-                           (snapshot?.formData?.lastName || "");
-
-                        const [fName, ...lParts] = (
-                           derivedFullName || ""
-                        ).split(" ");
-                        const lName = lParts.join(" ");
-
-                        const itemsForOrder = cartItems.map((it: any) => ({
-                           product_id: it.product_id || it.id,
-                           product_variation_id: it.variation_id || undefined,
-                           product_name: it.name,
-                           product_sku: it.sku || undefined,
-                           variation_name: it.variation_name || undefined,
-                           price: it.price,
-                           quantity: it.quantity,
-                           total: it.price * it.quantity,
-                        }));
-
-                        const orderPayload = {
-                           order: {
-                              user_id: user?.id,
-                              subtotal,
-                              tax: transport,
-                              total,
-                              // Always provide email with fallback - prevents NOT NULL constraint error
-                              customer_email: (snapshot?.formData?.email || "").trim() || 
-                                 `guest-${(snapshot?.formData?.phone || "").replace(/\D/g, '') || Date.now()}@nihemart.rw`,
-                              customer_first_name: (fName || "").trim(),
-                              customer_last_name: (lName || "").trim(),
-                              customer_phone: (snapshot?.formData?.phone ||
-                                 undefined) as any,
-                              delivery_address: (snapshot?.formData?.address ||
-                                 "") as any,
-                              delivery_city: (snapshot?.formData?.city ||
-                                 "") as any,
-                              status: "pending",
-                              // Use actual payment method from payment record, not snapshot (fixes retry mode)
-                              payment_method: payment?.payment_method || (snapshot?.paymentMethod as any) || "",
-                              delivery_notes: (snapshot?.formData
-                                 ?.delivery_notes || undefined) as any,
-                           },
-                           items: itemsForOrder,
-                        } as any;
-
-                        // Create order through mutation (if available)
-                        if (
-                           createOrder &&
-                           typeof createOrder.mutate === "function"
-                        ) {
-                           createOrder.mutate(orderPayload, {
-                              onSuccess: async (createdOrder: any) => {
-                                 try {
-                                    // Attempt to link payment
-                                    let linkSucceeded = false;
-                                    try {
-                                       const linkResp = await fetch(
-                                          "/api/payments/link",
-                                          {
-                                             method: "POST",
-                                             headers: {
-                                                "Content-Type":
-                                                   "application/json",
-                                             },
-                                             body: JSON.stringify({
-                                                orderId: createdOrder.id,
-                                                reference: ref,
-                                             }),
-                                          }
-                                       );
-                                       if (linkResp.ok) linkSucceeded = true;
-                                    } catch (e) {
-                                       console.error(
-                                          "Link error after auto-create:",
-                                          e
-                                       );
-                                    }
-
-                                    try {
-                                       localStorage.removeItem(
-                                          "nihemart_checkout_v1"
-                                       );
-                                    } catch (e) {}
-                                    try {
-                                       sessionStorage.removeItem(
-                                          "kpay_reference"
-                                       );
-                                    } catch (e) {}
-                                    try {
-                                       clearCart();
-                                    } catch (e) {}
-
-                                    if (user && user.id) {
-                                       router.push(
-                                          `/orders/${createdOrder.id}`
-                                       );
-                                    } else {
-                                       router.push(`/thank-you`);
-                                    }
-                                 } catch (err) {
-                                    console.error(
-                                       "Error after creating order on payment page:",
-                                       err
-                                    );
-                                    router.push("/");
-                                 }
-                              },
-                              onError: (err: any) => {
-                                 console.error(
-                                    "Auto-create order failed on payment page:",
-                                    err
-                                 );
-                                 toast.error(
-                                    "Failed to create order automatically. Please return to checkout and try again."
-                                 );
-                              },
-                           });
-                        } else {
-                           // If mutation not available, fall back to instruct user
-                           toast.error(
-                              "Unable to create order automatically. Please return to checkout to complete your order."
-                           );
-                           router.push(`/checkout?payment=success`);
-                        }
-                        return;
-                     }
-                  }
-               } catch (e) {
-                  console.error(
-                     "Auto-finalize/create on payment page failed:",
-                     e
-                  );
-               }
-
-               // As a last resort, fall back to the previous behavior of returning to checkout
-               router.push(`/checkout?payment=success`);
+               // Use the helper function to avoid code duplication
+               await finalizeAndMaybeCreateOrder(payment.reference);
                return;
             }
             if (s === "failed" || s === "cancelled") {
@@ -591,6 +535,10 @@ export default function PaymentPage() {
                setPayment((prev) => (prev ? { ...prev, status: s } : null));
             }
          } else if (statusResult.error) {
+            // Don't show errors if timeout was already reported or polling was stopped
+            if (stoppedPolling || timeoutReportedRef.current) {
+               return;
+            }
             console.error("Payment status check error:", statusResult.error);
             // Increment status check count
             statusCheckCountRef.current++;
@@ -604,6 +552,10 @@ export default function PaymentPage() {
             }
          }
       } catch (err) {
+         // Don't show errors if timeout was already reported or polling was stopped
+         if (stoppedPolling || timeoutReportedRef.current) {
+            return;
+         }
          console.error("Failed to check payment status:", err);
          toast.error(
             "Having trouble checking payment status. Please refresh the page or try a different payment method.",
@@ -615,9 +567,28 @@ export default function PaymentPage() {
       // Countdown-driven timeout handles termination; no per-check timeout here.
    }; // Removed extra closing brace
 
+   // Check if we're returning from KPay (card payment redirect)
    useEffect(() => {
-      fetchPaymentData();
-   }, [paymentId]);
+      // Check URL parameters that KPay might add when redirecting back
+      const urlParams = new URLSearchParams(window.location.search);
+      const kpayRef = urlParams.get("refid") || urlParams.get("reference");
+      const kpayTid = urlParams.get("tid") || urlParams.get("transactionId");
+      
+      // If we have KPay parameters but paymentId is invalid, try to use the reference
+      if ((kpayRef || kpayTid) && !paymentId) {
+         const ref = kpayRef || sessionStorage.getItem("kpay_reference");
+         if (ref && ref !== "null" && ref !== "undefined") {
+            console.log("[PaymentPage] Detected KPay return, using reference:", ref);
+            router.replace(`/payment/${ref}`);
+            return;
+         }
+      }
+      
+      // If we have a valid paymentId, fetch payment data
+      if (paymentId) {
+         fetchPaymentData();
+      }
+   }, [paymentId, router]);
 
    useEffect(() => {
       if (!payment || paymentCompleted || loading || stoppedPolling) return;

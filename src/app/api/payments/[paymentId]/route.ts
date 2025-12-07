@@ -33,8 +33,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Get auth token from request headers
       const authToken = getAuthToken(request);
 
-      // Forward request to backend
-      const backendUrl = `${API_BASE}/payments/${paymentId}`;
+      // Check if paymentId is a reference (starts with "PAY-") or a payment ID (UUID)
+      const isReference = paymentId.startsWith("PAY-");
+      
+      let backendUrl: string;
+      if (isReference) {
+         // Fetch payment session by reference
+         backendUrl = `${API_BASE}/payments/session/${paymentId}`;
+      } else {
+         // Fetch payment by ID
+         backendUrl = `${API_BASE}/payments/${paymentId}`;
+      }
+
       const backendResponse = await fetch(backendUrl, {
          method: "GET",
          headers: {
@@ -48,6 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       if (!backendResponse.ok) {
          logger.error("api", "Backend payment fetch failed", {
             paymentId,
+            isReference,
             status: backendResponse.status,
             error: backendData.message || backendData.error,
          });
@@ -59,28 +70,61 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
          );
       }
 
-      // Transform backend response (camelCase to snake_case for compatibility)
-      const payment = backendData.data || backendData;
-      const transformed = {
-         ...payment,
-         order_id: payment.orderId || payment.order_id,
-         kpay_transaction_id: payment.kpayTransactionId || payment.kpay_transaction_id,
-         kpay_auth_key: payment.kpayAuthKey || payment.kpay_auth_key,
-         kpay_return_code: payment.kpayReturnCode || payment.kpay_return_code,
-         kpay_response: payment.kpayResponse || payment.kpay_response,
-         kpay_webhook_data: payment.kpayWebhookData || payment.kpay_webhook_data,
-         kpay_mom_transaction_id: payment.kpayMomTransactionId || payment.kpay_mom_transaction_id,
-         kpay_pay_account: payment.kpayPayAccount || payment.kpay_pay_account,
-         failure_reason: payment.failureReason || payment.failure_reason,
-         client_timeout: payment.clientTimeout || payment.client_timeout,
-         client_timeout_reason: payment.clientTimeoutReason || payment.client_timeout_reason,
-         created_at: payment.createdAt || payment.created_at,
-         updated_at: payment.updatedAt || payment.updated_at,
-         completed_at: payment.completedAt || payment.completed_at,
-      };
+      // Transform backend response based on whether it's a session or payment
+      let transformed: any;
+      
+      if (isReference && backendData.session) {
+         // Transform payment session to match PaymentData format
+         const session = backendData.session;
+         // Extract checkout URL from kpayResponse - this is critical for card payments
+         const checkoutUrl = 
+            session.kpayResponse?.url || 
+            session.kpayResponse?.redirecturl || 
+            session.kpayResponse?.redirectUrl ||
+            null;
+         
+         transformed = {
+            id: session.id,
+            order_id: backendData.orderId || null,
+            amount: session.amount,
+            currency: session.currency,
+            payment_method: session.paymentMethod,
+            status: session.status,
+            reference: session.reference,
+            kpay_transaction_id: session.kpayTransactionId || null,
+            customer_name: session.customerName || "",
+            customer_email: session.customerEmail || "",
+            customer_phone: session.customerPhone || "",
+            created_at: session.createdAt,
+            updated_at: session.updatedAt,
+            completed_at: session.status === "completed" ? session.updatedAt : null,
+            checkout_url: checkoutUrl,
+         };
+      } else {
+         // Transform payment response (camelCase to snake_case for compatibility)
+         const payment = backendData.data || backendData;
+         transformed = {
+            ...payment,
+            order_id: payment.orderId || payment.order_id,
+            kpay_transaction_id: payment.kpayTransactionId || payment.kpay_transaction_id,
+            kpay_auth_key: payment.kpayAuthKey || payment.kpay_auth_key,
+            kpay_return_code: payment.kpayReturnCode || payment.kpay_return_code,
+            kpay_response: payment.kpayResponse || payment.kpay_response,
+            kpay_webhook_data: payment.kpayWebhookData || payment.kpay_webhook_data,
+            kpay_mom_transaction_id: payment.kpayMomTransactionId || payment.kpay_mom_transaction_id,
+            kpay_pay_account: payment.kpayPayAccount || payment.kpay_pay_account,
+            failure_reason: payment.failureReason || payment.failure_reason,
+            client_timeout: payment.clientTimeout || payment.client_timeout,
+            client_timeout_reason: payment.clientTimeoutReason || payment.client_timeout_reason,
+            created_at: payment.createdAt || payment.created_at,
+            updated_at: payment.updatedAt || payment.updated_at,
+            completed_at: payment.completedAt || payment.completed_at,
+         };
+      }
 
       logger.info("api", "Payment details retrieved successfully", {
          paymentId,
+         isReference,
          orderId: transformed.order_id,
          status: transformed.status,
          amount: transformed.amount,

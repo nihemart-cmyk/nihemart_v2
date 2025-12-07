@@ -131,56 +131,87 @@ const CustomerTrendGraph = () => {
       if (ordersResponse && Array.isArray(ordersResponse.data)) {
          const orders = ordersResponse.data as any[];
 
-         // Group orders by YYYY-MM-DD
+         // Group orders by day of week for weekly view, or by date for longer ranges
+         const isWeekly = range === "Last 7 days" || range === "Anytime";
          const map = new Map<string, any[]>();
+         
          for (const o of orders) {
             const created = o?.created_at || o?.createdAt || o?.date || null;
             if (!created) continue;
             const d = new Date(created);
             if (isNaN(d.getTime())) continue;
-            const key = d.toISOString().slice(0, 10);
+            
+            let key: string;
+            if (isWeekly) {
+               // Group by day of week (Sun, Mon, Tue, etc.)
+               const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+               key = dayNames[d.getDay()];
+            } else {
+               // Group by date
+               key = d.toISOString().slice(0, 10);
+            }
+            
             const arr = map.get(key) || [];
             arr.push(o);
             map.set(key, arr);
          }
 
-         const keys = Array.from(map.keys()).sort();
-         if (!keys.length) return fallbackData;
+         if (isWeekly) {
+            // Return data for all 7 days of the week
+            const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+            return days.map((day) => {
+               const arr = map.get(day) || [];
+               let value = 0;
+               if (selectedMetric === "Active Customers") {
+                  const set = new Set(
+                     arr.map((x: any) => x.userId || x.user_id || x.user)
+                  );
+                  value = set.size;
+               } else if (selectedMetric === "Completed") {
+                  value = arr.filter((x: any) => {
+                     const s = String(x.status || "").toLowerCase();
+                     return ["delivered", "shipped", "completed"].includes(s);
+                  }).length;
+               } else {
+                  value = arr.length;
+               }
+               return { day, value };
+            });
+         } else {
+            // For longer ranges, return by date
+            const keys = Array.from(map.keys()).sort();
+            if (!keys.length) return fallbackData;
 
-         return keys.map((k) => {
-            const arr = map.get(k) || [];
-            let value = 0;
-            if (selectedMetric === "Active Customers") {
-               const set = new Set(
-                  arr.map((x: any) => x.user_id || x.userId || x.user)
-               );
-               value = set.size;
-            } else if (selectedMetric === "Completed") {
-               value = arr.filter((x: any) => {
-                  const s = String(x.status || "").toLowerCase();
-                  return [
-                     "delivered",
-                     "shipped",
-                     "completed",
-                     "refunded",
-                  ].includes(s);
-               }).length;
-            } else {
-               value = arr.length;
-            }
+            return keys.map((k) => {
+               const arr = map.get(k) || [];
+               let value = 0;
+               if (selectedMetric === "Active Customers") {
+                  const set = new Set(
+                     arr.map((x: any) => x.userId || x.user_id || x.user)
+                  );
+                  value = set.size;
+               } else if (selectedMetric === "Completed") {
+                  value = arr.filter((x: any) => {
+                     const s = String(x.status || "").toLowerCase();
+                     return ["delivered", "shipped", "completed"].includes(s);
+                  }).length;
+               } else {
+                  value = arr.length;
+               }
 
-            return {
-               day: new Date(k).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-               }),
-               value,
-            };
-         });
+               return {
+                  day: new Date(k).toLocaleDateString("en-US", {
+                     month: "short",
+                     day: "numeric",
+                  }),
+                  value,
+               };
+            });
+         }
       }
 
       return fallbackData;
-   }, [statsData, ordersResponse, selectedMetric]);
+   }, [statsData, ordersResponse, selectedMetric, range]);
 
    // Debug: log source data used by the chart to the browser console
    try {

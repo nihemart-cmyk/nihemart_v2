@@ -374,7 +374,7 @@ export const columns: ColumnDef<Order>[] = [
             statusLower === "refunded" ||
             orderRefundStatus === "approved" ||
             orderRefundStatus === "refunded";
-         const { updateOrderStatus } = useOrders();
+         const { cancelOrder } = useOrders();
          const hasRefund =
             (Array.isArray(order.items) &&
                order.items.some((it) => it.refund_status === "requested")) ||
@@ -393,14 +393,10 @@ export const columns: ColumnDef<Order>[] = [
          const handleCancelOrder = async () => {
             setIsCancelling(true);
             try {
-               await updateOrderStatus.mutateAsync({
-                  id: order.id,
-                  status: "cancelled",
-               } as any);
-               toast.success("Order cancelled successfully");
+               await cancelOrder.mutateAsync(order.id);
                setShowCancelAlert(false);
             } catch (err: any) {
-               toast.error(err?.message || "Failed to cancel order");
+               // Error toast is handled by the hook
             } finally {
                setIsCancelling(false);
             }

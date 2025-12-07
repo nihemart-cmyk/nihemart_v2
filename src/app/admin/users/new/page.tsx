@@ -61,35 +61,29 @@ export default function CreateUserPage() {
         return;
       }
 
-      const res = await fetch("/api/admin/create-user", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, fullName, phone, role }),
+      const userAPI = (await import("@/lib/api/users")).default;
+      await userAPI.createUser({
+        email,
+        password,
+        fullName: fullName || undefined,
+        role: role.toUpperCase(),
       });
 
-      const data = await res.json();
+      setMessage("User created successfully!");
+      toast.success("User created successfully!");
+      // Reset form
+      setEmail("");
+      setPassword("");
+      setFullName("");
+      setPhone("");
+      setRole("user");
 
-      if (res.ok) {
-        setMessage("User created successfully!");
-        toast.success("User created successfully!");
-        // Reset form
-        setEmail("");
-        setPassword("");
-        setFullName("");
-        setPhone("");
-        setRole("user");
-
-        // Optional: redirect to users list after a delay
-        setTimeout(() => {
-          router.push("/admin/users");
-        }, 1500);
-      } else {
-        const errorMessage = data.error || "Failed to create user";
-        setError(errorMessage);
-        toast.error(errorMessage);
-      }
+      // Optional: redirect to users list after a delay
+      setTimeout(() => {
+        router.push("/admin/users");
+      }, 1500);
     } catch (error: any) {
-      const errorMessage = error.message || "An unexpected error occurred";
+      const errorMessage = error?.response?.data?.message || error.message || "An unexpected error occurred";
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {

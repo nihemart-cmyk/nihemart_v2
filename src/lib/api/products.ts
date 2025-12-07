@@ -1,5 +1,5 @@
 import handleApiRequest from "@/lib/handleApiRequest";
-import { authorizedAPI } from "@/lib/api";
+import { authorizedAPI, unauthorizedAPI } from "@/lib/api";
 
 // Product types from backend API
 export type ProductStatus = "active" | "draft" | "out_of_stock";
@@ -170,11 +170,28 @@ export async function fetchProductsPage({
 }: ProductQueryOptions) {
   const params = new URLSearchParams();
   if (filters.search) params.append("search", String(filters.search));
-  if (filters.category) params.append("category", String(filters.category));
-  if (filters.status) params.append("status", String(filters.status));
+  // Backend expects categoryId, not category
+  if (filters.category && filters.category !== "all") {
+    params.append("categoryId", String(filters.category));
+  }
+  if (filters.status && filters.status !== "all") {
+    params.append("status", String(filters.status));
+  }
   params.append("page", String(pagination.page));
   params.append("limit", String(pagination.limit));
-  params.append("sortColumn", sort.column);
+  
+  // Map frontend snake_case sort columns to backend camelCase
+  const sortColumnMap: Record<string, string> = {
+    created_at: "createdAt",
+    updated_at: "updatedAt",
+    main_image_url: "mainImageUrl",
+    category_id: "categoryId",
+    subcategory_id: "subcategoryId",
+    short_description: "shortDescription",
+    compare_at_price: "compareAtPrice",
+  };
+  const backendSortColumn = sortColumnMap[sort.column] || sort.column;
+  params.append("sortColumn", backendSortColumn);
   params.append("sortDirection", sort.direction);
 
   const queryString = params.toString();
@@ -182,8 +199,70 @@ export async function fetchProductsPage({
     authorizedAPI.get(`/products${queryString ? `?${queryString}` : ""}`)
   );
 
-  // Backend should return { data: Product[], count: number }
-  return result;
+  // Helper to convert relative image URLs to absolute backend URLs
+  const getAbsoluteImageUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    
+    // If already absolute, return as is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // Convert relative path to absolute URL using backend API base
+    const apiBase = typeof window !== "undefined" 
+      ? (process.env.NEXT_PUBLIC_API_BASE || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api")
+      : "http://localhost:4000/api";
+    
+    // Remove /api suffix if present to get base backend URL
+    const backendBase = apiBase.replace(/\/api$/, "");
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${backendBase}${cleanPath}`;
+  };
+
+  // Backend returns { data: Product[], pagination: { total, ... } }
+  // Transform to { data: Product[], count: number }
+  // Also transform camelCase to snake_case
+  if (result && result.data && Array.isArray(result.data)) {
+    const transformedData = result.data.map((product: any) => {
+      // Get image URL and ensure it's absolute
+      const imageUrl = product.mainImageUrl || product.main_image_url || null;
+      const absoluteImageUrl = getAbsoluteImageUrl(imageUrl);
+      
+      return {
+        id: product.id,
+        name: product.name || "",
+        price: product.price || 0,
+        stock: product.stock ?? null,
+        status: product.status || "draft",
+        featured: product.featured || false,
+        main_image_url: absoluteImageUrl,
+        brand: product.brand || null,
+        category: product.category || null,
+        created_at: product.createdAt || product.created_at || new Date().toISOString(),
+        updated_at: product.updatedAt || product.updated_at || product.createdAt || product.created_at || new Date().toISOString(),
+        // Include other fields that might be needed
+        description: product.description || null,
+        short_description: product.shortDescription || product.short_description || null,
+        sku: product.sku || null,
+        category_id: product.categoryId || product.category_id || (product.category ? product.category.id : null),
+        subcategory_id: product.subcategoryId || product.subcategory_id || null,
+      };
+    });
+
+    const count = result.pagination?.total ?? result.count ?? result.data.length ?? 0;
+
+    return {
+      data: transformedData,
+      count: count,
+    };
+  }
+
+  // Return empty result if no data or invalid response
+  console.warn("fetchProductsPage: Invalid or empty response", result);
+  return {
+    data: [],
+    count: 0,
+  };
 }
 
 /**
@@ -388,6 +467,105 @@ export async function fetchProductsLight(limit = 500) {
 // ============ STORE FRONTEND FUNCTIONS ============
 
 /**
+ * Fetch a single product by ID (for product details page)
+ */
+export async function fetchStoreProductById(id: string) {
+  const result = await handleApiRequest(() =>
+    unauthorizedAPI.get(`/products/store/${id}`)
+  );
+
+  if (!result || !result.product) {
+    return null;
+  }
+
+  // Fetch similar products based on categories
+  let similarProducts: StoreProduct[] = [];
+  if (result?.product?.categories && result.product.categories.length > 0) {
+    try {
+      const categoryIds = result.product.categories.map((c: any) => c.id);
+      const similarResult = await handleApiRequest(() =>
+        unauthorizedAPI.get(
+          `/products/store?categories=${categoryIds.join(',')}&limit=4&page=1`
+        )
+      );
+      if (similarResult?.data) {
+        // Filter out the current product
+        similarProducts = similarResult.data.filter(
+          (p: StoreProduct) => p.id !== id
+        );
+      }
+    } catch (error) {
+      console.error('Failed to fetch similar products:', error);
+    }
+  }
+
+  return {
+    ...result,
+    similarProducts,
+  } as {
+    product: {
+      id: string;
+      name: string;
+      description: string | null;
+      short_description: string | null;
+      stock: number;
+      price: number;
+      compare_at_price: number | null;
+      main_image_url: string | null;
+      average_rating: number | null;
+      review_count: number;
+      brand: string | null;
+      social_media_link: string | null;
+      category: { id: string; name: string } | null;
+      categories: Array<{ id: string; name: string }>;
+      subcategories: Array<{ id: string; name: string }>;
+    };
+    images: Array<{
+      id: string;
+      url: string;
+      product_variation_id: string | null;
+    }>;
+    variations: Array<{
+      id: string;
+      name: string | null;
+      price: number | null;
+      stock: number;
+      attributes: Record<string, string>;
+    }>;
+    reviews: Array<{
+      id: string;
+      rating: number;
+      title: string | null;
+      content: string | null;
+      image_url: string | null;
+      created_at: string;
+      author: {
+        full_name: string | null;
+      };
+    }>;
+    similarProducts: StoreProduct[];
+  };
+}
+
+/**
+ * Fetch all product IDs (for static generation)
+ */
+export async function fetchAllProductIds(): Promise<string[]> {
+  try {
+    const result = await handleApiRequest(() =>
+      unauthorizedAPI.get('/products/store?limit=10000&page=1')
+    );
+    if (result?.data) {
+      return result.data.map((product: StoreProduct) => product.id);
+    }
+    return [];
+  } catch (error) {
+    console.error('Failed to fetch product IDs:', error);
+    return [];
+  }
+}
+
+/**
  * Fetch paginated store products (for public product listing page)
  */
 export async function fetchStoreProducts(options: StoreQueryOptions) {
@@ -423,7 +601,7 @@ export async function fetchStoreProducts(options: StoreQueryOptions) {
 
   const queryString = params.toString();
   const result = await handleApiRequest(() =>
-    authorizedAPI.get(`/store/products${queryString ? `?${queryString}` : ""}`)
+    authorizedAPI.get(`/products/store${queryString ? `?${queryString}` : ""}`)
   );
 
   return result as { data: StoreProduct[]; count: number };
@@ -434,7 +612,7 @@ export async function fetchStoreProducts(options: StoreQueryOptions) {
  */
 export async function fetchAllCategoriesWithSubcategories() {
   const result = await handleApiRequest(() =>
-    authorizedAPI.get(`/store/categories/with-subcategories`)
+    authorizedAPI.get(`/categories/with-subcategories`)
   );
 
   return result as {
@@ -448,7 +626,7 @@ export async function fetchAllCategoriesWithSubcategories() {
  */
 export async function fetchCategoriesLight(): Promise<CategoryLight[]> {
   const result = await handleApiRequest(() =>
-    authorizedAPI.get(`/store/categories/light`)
+    authorizedAPI.get(`/categories/light`)
   );
 
   return result;
@@ -459,7 +637,7 @@ export async function fetchCategoriesLight(): Promise<CategoryLight[]> {
  */
 export async function fetchStoreCategories(): Promise<StoreCategorySimple[]> {
   const result = await handleApiRequest(() =>
-    authorizedAPI.get(`/store/categories`)
+    authorizedAPI.get(`/categories`)
   );
 
   return result;
@@ -474,11 +652,12 @@ export async function fetchProductsUnder15k(
   const params = new URLSearchParams();
   if (categoryId) params.append("categoryId", categoryId);
   params.append("maxPrice", "15000");
+  params.append("featured", "true");
 
   const queryString = params.toString();
   const result = await handleApiRequest(() =>
     authorizedAPI.get(
-      `/store/products/featured/under-limit${queryString ? `?${queryString}` : ""}`
+      `/products/featured/under-limit${queryString ? `?${queryString}` : ""}`
     )
   );
 
@@ -512,7 +691,7 @@ export async function fetchLandingPageProducts(options: {
   const queryString = params.toString();
   const result = await handleApiRequest(() =>
     authorizedAPI.get(
-      `/store/products/landing${queryString ? `?${queryString}` : ""}`
+      `/products/landing${queryString ? `?${queryString}` : ""}`
     )
   );
 

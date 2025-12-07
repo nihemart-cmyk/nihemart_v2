@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAuthStore } from "@/store/auth.store";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { getTimeUntilExpiration, isTokenExpiringSoon } from "@/utils/jwt";
 
 // The AuthProvider handles initialization and token refresh
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -71,58 +72,111 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [currentUser, error, setAuthData, clearAuth]);
 
-  // Set up automatic token refresh
+  // Set up automatic token refresh based on token expiration
   useEffect(() => {
-    const { refreshToken } = useAuthStore.getState();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let lastAccessToken: string | null = null;
 
-    if (refreshToken) {
-      // Clear any existing interval to prevent memory leaks
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
+    const scheduleRefresh = () => {
+      // Clear any existing timeout
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
       }
 
-      // Refresh token every 14 minutes (access tokens expire in 15 minutes)
-      refreshIntervalRef.current = setInterval(
+      const { accessToken, refreshToken } = useAuthStore.getState();
+      
+      if (!accessToken || !refreshToken) {
+        return;
+      }
+
+      // Only reschedule if token actually changed
+      if (accessToken === lastAccessToken && timeoutId !== null) {
+        return;
+      }
+      lastAccessToken = accessToken;
+
+      const timeUntilExpiration = getTimeUntilExpiration(accessToken);
+      
+      if (!timeUntilExpiration) {
+        // Token is already expired or invalid, refresh immediately
+        refreshTokenNow();
+        return;
+      }
+
+      // Refresh token 1 hour before it expires (or immediately if less than 1 hour remaining)
+      const refreshTime = Math.max(timeUntilExpiration - 3600 * 1000, 60000); // At least 1 minute delay
+
+      timeoutId = setTimeout(
         async () => {
-          try {
-            const { refreshToken: currentRefreshToken } =
-              useAuthStore.getState();
-            if (!currentRefreshToken) {
-              clearAuth();
-              return;
-            }
-
-            const { unauthorizedAPI } = await import("@/lib/api");
-            const handleApiRequest = (await import("@/lib/handleApiRequest"))
-              .default;
-
-            const response = await handleApiRequest(() =>
-              unauthorizedAPI.post("/auth/refresh", {
-                refreshToken: currentRefreshToken,
-              })
-            );
-
-            setAuthData({
-              accessToken: response.accessToken,
-              refreshToken: response.refreshToken,
-              user: response.user,
-            });
-          } catch (error) {
-            console.error("Token refresh failed:", error);
-            clearAuth();
-          }
+          await refreshTokenNow();
         },
-        14 * 60 * 1000
-      ); // 14 minutes
-    }
+        refreshTime
+      );
+    };
 
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
-        refreshIntervalRef.current = null;
+    const refreshTokenNow = async () => {
+      try {
+        const { refreshToken: currentRefreshToken, accessToken: currentAccessToken } =
+          useAuthStore.getState();
+        
+        if (!currentRefreshToken) {
+          clearAuth();
+          return;
+        }
+
+        // Only refresh if token is expiring soon or already expired
+        if (currentAccessToken && !isTokenExpiringSoon(currentAccessToken, 3600)) {
+          // Token is still valid, reschedule
+          scheduleRefresh();
+          return;
+        }
+
+        const { unauthorizedAPI } = await import("@/lib/api");
+        const handleApiRequest = (await import("@/lib/handleApiRequest"))
+          .default;
+
+        const response = await handleApiRequest(() =>
+          unauthorizedAPI.post("/auth/refresh", {
+            refreshToken: currentRefreshToken,
+          })
+        );
+
+        setAuthData({
+          accessToken: response.accessToken,
+          refreshToken: response.refreshToken,
+          user: response.user,
+        });
+
+        // Reschedule after successful refresh (will be triggered by store update)
+        lastAccessToken = null; // Reset to allow rescheduling
+      } catch (error) {
+        console.error("Token refresh failed:", error);
+        clearAuth();
       }
     };
-  }, [setAuthData, clearAuth, useAuthStore.getState().refreshToken]);
+
+    // Subscribe to store changes to reschedule when tokens update
+    const unsubscribe = useAuthStore.subscribe(
+      (state) => {
+        const { accessToken, refreshToken } = state;
+        // Only reschedule if tokens changed
+        if (accessToken !== lastAccessToken && accessToken && refreshToken) {
+          scheduleRefresh();
+        }
+      }
+    );
+
+    // Initial schedule
+    scheduleRefresh();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      unsubscribe();
+    };
+  }, [setAuthData, clearAuth]);
 
   return <>{children}</>;
 };

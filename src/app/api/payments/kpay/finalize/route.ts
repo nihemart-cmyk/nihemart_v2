@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceSupabaseClient } from "@/utils/supabase/service";
-import { initializeKPayService } from "@/lib/services/kpay";
-import { createOrder } from "@/integrations/supabase/orders";
 import { logger } from "@/lib/logger";
+import { API_BASE } from "@/lib/api";
+
+// Helper to extract auth token from request
+function getAuthToken(request: NextRequest): string | null {
+   const authHeader = request.headers.get("authorization");
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+   }
+   return null;
+}
 
 export async function POST(request: NextRequest) {
    try {
@@ -16,147 +23,83 @@ export async function POST(request: NextRequest) {
          );
       }
 
-      const supabase = createServiceSupabaseClient();
+      // Get auth token from request headers
+      const authToken = getAuthToken(request);
 
-      // Find matching payments row (session-like payment with order_id null)
-      let payment: any = null;
-      let paymentErr: any = null;
+      // Call backend's checkPaymentStatus endpoint
+      // This will check payment status with KPay, update the payment session,
+      // and create the order if payment is successful and order hasn't been created yet
+      const backendUrl = `${API_BASE}/payments/status`;
+      const backendResponse = await fetch(backendUrl, {
+         method: "POST",
+         headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+         },
+         body: JSON.stringify({
+            transactionId,
+            reference,
+         }),
+      });
 
-      if (reference) {
-         const res = await supabase
-            .from("payments")
-            .select("*")
-            .eq("reference", reference)
-            .limit(1)
-            .maybeSingle();
-         payment = res.data;
-         paymentErr = res.error;
-      }
+      const backendData = await backendResponse.json();
 
-      if (!payment && transactionId) {
-         const res = await supabase
-            .from("payments")
-            .select("*")
-            .eq("kpay_transaction_id", transactionId)
-            .limit(1)
-            .maybeSingle();
-         payment = res.data;
-         paymentErr = res.error || paymentErr;
-      }
-
-      if (paymentErr) {
-         console.error(
-            "Failed to lookup payments row for finalize:",
-            paymentErr
-         );
-      }
-
-      if (!payment) {
+      if (!backendResponse.ok) {
+         logger.error("api", "Backend payment status check failed in finalize", {
+            reference,
+            transactionId,
+            status: backendResponse.status,
+            error: backendData.message || backendData.error,
+         });
          return NextResponse.json(
-            { error: "Payment not found" },
-            { status: 404 }
+            {
+               success: false,
+               error: backendData.message || backendData.error || "Failed to finalize payment",
+            },
+            { status: backendResponse.status }
          );
       }
 
-      // We only finalize session-like payments that don't have an order yet
-      if (payment.order_id) {
-         return NextResponse.json(
-            { success: true, orderId: payment.order_id },
-            { status: 200 }
-         );
-      }
+      // Backend's checkPaymentStatus returns:
+      // - orderCreated: true if order was created
+      // - orderId: the created order ID
+      // - orderNumber: the created order number
+      // - success: true if status check succeeded
+      // - data: the KPay response data
 
-      if (payment.status !== "completed") {
-         // Attempt to reconcile with KPay directly in case webhook/status
-         // update hasn't arrived yet. If KPay shows the payment completed,
-         // persist that and continue; otherwise return 409.
-         try {
-            const kpayService = initializeKPayService();
-            const kpayResponse = await kpayService.checkPaymentStatus({
-               transactionId: payment.kpay_transaction_id,
-               orderReference: payment.reference,
-            });
+      const orderCreated = backendData.orderCreated === true;
+      const orderId = backendData.orderId || null;
+      const orderNumber = backendData.orderNumber || null;
 
-            const statusIdStr = String(kpayResponse?.statusid || "").padStart(
-               2,
-               "0"
-            );
+      logger.info("api", "Payment finalized", {
+         reference,
+         transactionId,
+         orderCreated,
+         orderId,
+      });
 
-            if (statusIdStr === "01") {
-               // Persist KPay completion info on payments row
-               const updateData: any = {
-                  updated_at: new Date().toISOString(),
-                  status: "completed",
-                  completed_at: new Date().toISOString(),
-               };
-               if (kpayResponse.momtransactionid) {
-                  updateData.kpay_mom_transaction_id =
-                     kpayResponse.momtransactionid;
-               }
-               if (kpayResponse.tid) {
-                  updateData.kpay_transaction_id = kpayResponse.tid;
-               }
-               if (kpayResponse) {
-                  updateData.kpay_response = kpayResponse;
-               }
-
-               const { error: payUpdErr } = await supabase
-                  .from("payments")
-                  .update(updateData)
-                  .eq("id", payment.id);
-
-               if (payUpdErr) {
-                  logger.error(
-                     "api",
-                     "Failed to update payments row from KPay reconciliation",
-                     payUpdErr
-                  );
-               } else {
-                  // reflect the update locally
-                  payment.status = "completed";
-               }
-            } else {
-               return NextResponse.json(
-                  { error: "Payment not yet completed" },
-                  { status: 409 }
-               );
-            }
-         } catch (err) {
-            console.error("KPay reconciliation failed in finalize:", err);
-            // If we can't reach KPay, return the last-known DB state so the
-            // client can keep polling instead of treating this as a hard error.
-            return NextResponse.json(
-               {
-                  success: true,
-                  paymentId: payment.id,
-                  status: payment.status,
-                  canCreateOrder:
-                     payment.status === "completed" && !payment.order_id,
-                  message:
-                     "Unable to check with payment gateway, showing last known status",
-               },
-               { status: 200 }
-            );
-         }
-      }
-
-      // Do NOT create an order here. Finalize confirms payment status and
-      // allows the client to explicitly call the create-order endpoint when
-      // the customer clicks "Create order" in the UI.
       return NextResponse.json({
          success: true,
-         paymentId: payment.id,
-         status: payment.status,
-         canCreateOrder: payment.status === "completed" && !payment.order_id,
-         message:
-            payment.status === "completed"
-               ? "Payment completed."
-               : "Payment is not completed yet",
+         orderId: orderId,
+         orderNumber: orderNumber,
+         canCreateOrder: !orderCreated && backendData.data?.statusid === "01",
+         status: backendData.data?.statusid === "01" ? "completed" : "pending",
+         message: orderCreated
+            ? "Payment completed and order created."
+            : backendData.data?.statusid === "01"
+            ? "Payment completed."
+            : "Payment is not completed yet",
       });
    } catch (error) {
-      console.error("Finalize error:", error);
+      logger.error("api", "Finalize error", {
+         error: error instanceof Error ? error.message : String(error),
+      });
       return NextResponse.json(
-         { error: "Internal server error" },
+         { 
+            success: false,
+            error: "Internal server error",
+            technicalError: error instanceof Error ? error.message : String(error),
+         },
          { status: 500 }
       );
    }

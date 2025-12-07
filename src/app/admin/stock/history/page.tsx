@@ -35,7 +35,7 @@ import {
   RefreshCw
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchAllStockHistory, StockHistoryWithDetails, fetchProductsForStockManagement, StockProduct } from '@/integrations/supabase/stock'
+import { fetchAllStockHistory, StockHistoryWithDetails, fetchProductsForStockManagement, StockProduct } from '@/lib/api/stock'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth.store'

@@ -9,13 +9,17 @@ export interface Rider {
    id: string;
    userId?: string | null;
    fullName?: string | null;
+   full_name?: string | null; // snake_case for compatibility
    phone?: string | null;
    vehicle?: string | null;
    imageUrl?: string | null;
+   image_url?: string | null; // snake_case for compatibility
    location?: string | null;
    active: boolean;
-   createdAt: string;
-   updatedAt: string;
+   createdAt?: string;
+   created_at?: string; // snake_case for compatibility
+   updatedAt?: string;
+   updated_at?: string; // snake_case for compatibility
 }
 
 export interface OrderAssignment {
@@ -54,18 +58,40 @@ export const riderKeys = {
    myAssignments: () => [...riderKeys.all, "myAssignments"] as const,
 };
 
+// Transform backend camelCase to frontend snake_case for compatibility
+function transformRider(rider: any): Rider {
+   return {
+      id: rider.id,
+      userId: rider.userId,
+      fullName: rider.fullName,
+      full_name: rider.fullName, // Add snake_case version
+      phone: rider.phone,
+      vehicle: rider.vehicle,
+      imageUrl: rider.imageUrl,
+      image_url: rider.imageUrl, // Add snake_case version
+      location: rider.location,
+      active: rider.active,
+      createdAt: rider.createdAt,
+      created_at: rider.createdAt, // Add snake_case version
+      updatedAt: rider.updatedAt,
+      updated_at: rider.updatedAt, // Add snake_case version
+   };
+}
+
 // Internal API functions
 const riderAPI = {
    // Admin: List riders
    listRiders: async (activeOnly = false): Promise<Rider[]> => {
-      return handleApiRequest(() =>
+      const riders = await handleApiRequest(() =>
          authorizedAPI.get(`/riders?active=${activeOnly}`)
       );
+      return Array.isArray(riders) ? riders.map(transformRider) : [];
    },
 
    // Admin: Get rider by ID
    getRiderById: async (id: string): Promise<Rider> => {
-      return handleApiRequest(() => authorizedAPI.get(`/riders/${id}`));
+      const rider = await handleApiRequest(() => authorizedAPI.get(`/riders/${id}`));
+      return transformRider(rider);
    },
 
    // Admin: Create rider
@@ -135,14 +161,46 @@ const riderAPI = {
       );
    },
 
-   // Admin: Get assignments for rider
-   getAssignmentsForRider: async (
-      riderId: string
-   ): Promise<OrderAssignment[]> => {
-      return handleApiRequest(() =>
-         authorizedAPI.get(`/riders/${riderId}/assignments`)
+  // Admin: Get assignments for rider
+  getAssignmentsForRider: async (
+    riderId: string
+  ): Promise<OrderAssignment[]> => {
+    return handleApiRequest(() =>
+      authorizedAPI.get(`/riders/${riderId}/assignments`)
+    );
+  },
+
+   // Admin: Get rider details with assignments
+   getRiderDetailsWithAssignments: async (
+      riderId: string,
+      limit = 20
+   ): Promise<{ rider: Rider; assignments: OrderAssignment[] }> => {
+      const result = await handleApiRequest(() =>
+         authorizedAPI.get(`/riders/${riderId}/details?limit=${limit}`)
       );
+      return {
+         rider: transformRider(result.rider),
+         assignments: result.assignments || [],
+      };
    },
+
+  // Admin: Get rider earnings
+  getRiderEarnings: async (days = 7): Promise<Record<string, number>> => {
+    const result = await handleApiRequest(() =>
+      authorizedAPI.get(`/riders/earnings/all?days=${days}`)
+    );
+    return result.earnings || {};
+  },
+
+  // Admin: Get top riders by amount
+  getTopRidersByAmount: async (
+    limit = 10,
+    days = 7
+  ): Promise<Array<{ id: string; name: string; code: string; amount: number; avatar: string | null }>> => {
+    return handleApiRequest(() =>
+      authorizedAPI.get(`/riders/top/amount?limit=${limit}&days=${days}`)
+    );
+  },
 };
 
 /**

@@ -28,7 +28,8 @@ export default function TransactionsMetrics() {
     }
   }
 
-  if (error) {
+  // Don't show error if we have stats data - just show empty stats
+  if (error && !stats) {
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 min-[500px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-6">

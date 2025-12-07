@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
-import { authorizedAPI } from "@/lib/api";
+import { authorizedAPI, unauthorizedAPI } from "@/lib/api";
 import handleApiRequest from "@/lib/handleApiRequest";
 import type {
    Order,
@@ -92,7 +92,7 @@ export const orderKeys = {
 
 // Internal API functions
 const orderAPI = {
-   // Get user orders
+   // Get user orders (allows guests - will filter by userId if authenticated, or by email/orderNumber if guest)
    getUserOrders: async (options: OrderQueryOptions = {}): Promise<any> => {
       const params = new URLSearchParams();
       
@@ -119,8 +119,9 @@ const orderAPI = {
       }
       
       const queryString = params.toString();
+      // Use unauthorizedAPI to allow guests (token will be attached via interceptor if available)
       const result = await handleApiRequest(() =>
-         authorizedAPI.get(`/orders${queryString ? `?${queryString}` : ""}`)
+         unauthorizedAPI.get(`/orders${queryString ? `?${queryString}` : ""}`)
       );
       return transformOrderList(result);
    },
@@ -158,9 +159,9 @@ const orderAPI = {
       return transformOrderList(result);
    },
 
-   // Get order by ID
+   // Get order by ID (allows guests)
    getOrderById: async (id: string): Promise<Order> => {
-      const result = await handleApiRequest(() => authorizedAPI.get(`/orders/${id}`));
+      const result = await handleApiRequest(() => unauthorizedAPI.get(`/orders/${id}`));
       return transformOrder(result);
    },
 
@@ -181,38 +182,46 @@ const orderAPI = {
       return transformOrder(result);
    },
 
-   // Request refund for item
+   // Cancel order (customer-facing - allows guests)
+   cancelOrder: async (id: string): Promise<Order> => {
+      const result = await handleApiRequest(() =>
+         unauthorizedAPI.patch(`/orders/${id}/cancel`)
+      );
+      return transformOrder(result);
+   },
+
+   // Request refund for item (customer-facing - allows guests)
    requestItemRefund: async (
       itemId: string,
       reason: string
    ): Promise<any> => {
       return handleApiRequest(() =>
-         authorizedAPI.post(`/orders/items/${itemId}/refund`, { reason })
+         unauthorizedAPI.post(`/orders/items/${itemId}/refund`, { reason })
       );
    },
 
-   // Request refund for order
+   // Request refund for order (customer-facing - allows guests)
    requestOrderRefund: async (
       orderId: string,
       reason: string
    ): Promise<Order> => {
       const result = await handleApiRequest(() =>
-         authorizedAPI.post(`/orders/${orderId}/refund`, { reason })
+         unauthorizedAPI.post(`/orders/${orderId}/refund`, { reason })
       );
       return transformOrder(result);
    },
 
-   // Cancel item refund request
+   // Cancel item refund request (customer-facing - allows guests)
    cancelItemRefundRequest: async (itemId: string): Promise<any> => {
       return handleApiRequest(() =>
-         authorizedAPI.post(`/orders/items/${itemId}/refund/cancel`)
+         unauthorizedAPI.post(`/orders/items/${itemId}/refund/cancel`)
       );
    },
 
-   // Cancel order refund request
+   // Cancel order refund request (customer-facing - allows guests)
    cancelOrderRefundRequest: async (orderId: string): Promise<Order> => {
       const result = await handleApiRequest(() =>
-         authorizedAPI.post(`/orders/${orderId}/refund/cancel`)
+         unauthorizedAPI.post(`/orders/${orderId}/refund/cancel`)
       );
       return transformOrder(result);
    },
@@ -264,15 +273,15 @@ const orderAPI = {
  * Hook for fetching user's orders
  */
 export function useUserOrders(options: OrderQueryOptions = {}) {
-   const { user, isLoggedIn } = useAuth();
+   const { user } = useAuth();
 
-   const key = orderKeys.userOrders(user?.id || "");
+   const key = orderKeys.userOrders(user?.id || "guest");
    const keyWithOptions = [...key, { ...(options || {}) }];
 
    return useQuery({
       queryKey: keyWithOptions,
       queryFn: () => orderAPI.getUserOrders(options),
-      enabled: isLoggedIn && !!user,
+      enabled: true, // Allow guests to query (they need to provide email/orderNumber in search)
       staleTime: 1000 * 60 * 5, // 5 minutes
    });
 }
@@ -292,15 +301,13 @@ export function useAllOrders(options: OrderQueryOptions = {}) {
 }
 
 /**
- * Hook for fetching single order
+ * Hook for fetching single order (allows guests)
  */
 export function useOrder(id: string) {
-   const { user, isLoggedIn } = useAuth();
-
    return useQuery({
       queryKey: orderKeys.detail(id),
       queryFn: () => orderAPI.getOrderById(id),
-      enabled: isLoggedIn && !!user && !!id,
+      enabled: !!id,
    });
 }
 
@@ -352,8 +359,72 @@ export function useOrderStats() {
    return useQuery<OrderStats>({
       queryKey: orderKeys.stats(),
       queryFn: async () => {
-         // TODO: Implement stats endpoint if backend has one
-         return {};
+         // Calculate stats from all orders (both external and non-external)
+         const ordersRes = await orderAPI.getAllOrders({});
+         const orders = Array.isArray(ordersRes) ? ordersRes : ordersRes?.data || [];
+         
+         // Calculate stats
+         const totalOrders = orders.length;
+         const deliveredOrders = orders.filter((o: any) => {
+            const status = String(o.status || "").toLowerCase();
+            return status === "delivered";
+         }).length;
+         const shippedOrders = orders.filter((o: any) => {
+            const status = String(o.status || "").toLowerCase();
+            return status === "shipped";
+         }).length;
+         const pendingOrders = orders.filter((o: any) => {
+            const status = String(o.status || "").toLowerCase();
+            return status === "pending";
+         }).length;
+         const processingOrders = orders.filter((o: any) => {
+            const status = String(o.status || "").toLowerCase();
+            return status === "processing";
+         }).length;
+         const cancelledOrders = orders.filter((o: any) => {
+            const status = String(o.status || "").toLowerCase();
+            return status === "cancelled";
+         }).length;
+         
+         const totalSales = orders
+            .filter((o: any) => {
+               const status = String(o.status || "").toLowerCase();
+               return status === "delivered";
+            })
+            .reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
+
+         // Group orders by day for chart data (last 7 days)
+         const dailyMap = new Map<string, number>();
+         const now = new Date();
+         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+         
+         orders.forEach((order: any) => {
+            const date = order.createdAt || order.created_at;
+            if (date) {
+               const orderDate = new Date(date);
+               if (orderDate >= sevenDaysAgo) {
+                  const day = orderDate.toISOString().split('T')[0];
+                  dailyMap.set(day, (dailyMap.get(day) || 0) + 1);
+               }
+            }
+         });
+
+         const daily = Array.from(dailyMap.entries()).map(([day, count]) => ({
+            day,
+            count,
+            value: count,
+         }));
+
+         return {
+            totalOrders,
+            deliveredOrders,
+            shippedOrders,
+            pendingOrders,
+            processingOrders,
+            cancelledOrders,
+            totalSales,
+            daily,
+         };
       },
       enabled: !!user && hasRole("admin"),
       staleTime: 1000 * 60 * 5, // 5 minutes
@@ -405,41 +476,14 @@ export function useCreateOrder() {
             });
          }
 
-         // Handle payment linking (if needed)
+         // Payment-order linking is handled automatically by the backend
+         // when creating orders from payment sessions, so no manual linking needed
+         // Clean up session storage reference if present
          try {
             if (typeof window !== "undefined") {
                const ref = sessionStorage.getItem("kpay_reference");
-               if (ref && data?.id) {
-                  (async () => {
-                     const maxAttempts = 3;
-                     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                        try {
-                           const resp = await fetch("/api/payments/link", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                 orderId: data.id,
-                                 reference: ref,
-                              }),
-                           });
-
-                           if (resp.ok || resp.status === 409) {
-                              try {
-                                 sessionStorage.removeItem("kpay_reference");
-                              } catch (e) {}
-                              break;
-                           }
-
-                           if (attempt < maxAttempts) {
-                              await new Promise((r) =>
-                                 setTimeout(r, 500 * attempt)
-                              );
-                           }
-                        } catch (e) {
-                           console.warn("Auto-link payment attempt failed:", e);
-                        }
-                     }
-                  })();
+               if (ref) {
+                  sessionStorage.removeItem("kpay_reference");
                }
             }
          } catch (e) {}
@@ -451,7 +495,85 @@ export function useCreateOrder() {
 }
 
 /**
- * Hook for updating order status
+ * Hook for canceling orders (customer-facing - allows guests)
+ */
+export function useCancelOrder() {
+   const queryClient = useQueryClient();
+   return useMutation({
+      mutationFn: async (id: string) => {
+         return await orderAPI.cancelOrder(id);
+      },
+      onMutate: async (id) => {
+         await queryClient.cancelQueries({ queryKey: orderKeys.all });
+
+         const previousQueries = queryClient.getQueriesData({});
+
+         for (const [key, data] of previousQueries) {
+            try {
+               if (!data) continue;
+
+               const asOrder = data as any;
+               if (asOrder && asOrder.id === id) {
+                  const updated = {
+                     ...asOrder,
+                     status: 'cancelled' as OrderStatus,
+                  };
+                  queryClient.setQueryData(key, updated);
+                  continue;
+               }
+
+               if (asOrder && Array.isArray(asOrder.data)) {
+                  const updatedList = { ...asOrder } as any;
+                  updatedList.data = asOrder.data.map((o: any) =>
+                     o && o.id === id
+                        ? { ...o, status: 'cancelled' as OrderStatus }
+                        : o
+                  );
+                  queryClient.setQueryData(key, updatedList);
+               }
+            } catch (e) {}
+         }
+
+         return { previousQueries };
+      },
+      onSuccess: (updatedOrder) => {
+         try {
+            queryClient.setQueryData(
+               orderKeys.detail(updatedOrder.id),
+               updatedOrder
+            );
+         } catch (e) {}
+         queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+         queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+         toast.success('Order cancelled successfully');
+      },
+      onError: (error, variables, context: any) => {
+         if (context?.previousQueries) {
+            for (const [key, data] of context.previousQueries) {
+               try {
+                  queryClient.setQueryData(key, data);
+               } catch (e) {}
+            }
+         }
+         console.error('Failed to cancel order:', error);
+         toast.error(error instanceof Error ? error.message : 'Failed to cancel order');
+      },
+      onSettled: (data) => {
+         try {
+            queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+            queryClient.invalidateQueries({ queryKey: orderKeys.stats() });
+            if (data?.id) {
+               queryClient.invalidateQueries({
+                  queryKey: orderKeys.detail(data.id),
+               });
+            }
+         } catch (e) {}
+      },
+   });
+}
+
+/**
+ * Hook for updating order status (admin only)
  */
 export function useUpdateOrderStatus() {
    const queryClient = useQueryClient();
@@ -778,6 +900,9 @@ export function useOrders() {
          useAllOrders(options || {}),
       useOrder: (id: string) => useOrder(id),
       useOrderStats: () => useOrderStats(),
+      // Mutation hooks
+      cancelOrder: useCancelOrder(),
+      updateOrderStatus: useUpdateOrderStatus(),
       useRequestRefundItem: () => useRejectOrderItem(),
       useCancelRefundRequestItem: () => useUnrejectOrderItem(),
       useRespondRefundRequest: () =>

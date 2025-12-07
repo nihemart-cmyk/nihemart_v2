@@ -13,7 +13,7 @@ import { useProducts } from "@/hooks/useProducts";
 import {
   Product,
   fetchProductForEdit,
-  fetchProductsLight,
+  fetchProductsPage,
 } from "@/lib/api/products";
 import { useQuery } from "@tanstack/react-query";
 import { useOrders } from "@/hooks/useOrders";
@@ -40,7 +40,9 @@ interface ExternalOrderItemInput {
   product_name: string;
   quantity: number;
   price: number;
+  product_id?: string;
   variation_name?: string;
+  product_variation_id?: string;
 }
 
 interface ExternalOrderFormData {
@@ -63,11 +65,25 @@ export default function AddExternalOrderPage() {
   const router = useRouter();
   const { createExternalOrder } = useExternalOrders();
   const productsHook = useProducts();
-  // lightweight product list for selectors to avoid heavy joins and timeouts
-  const { data: productsList, isLoading: productsLoading } = useQuery({
-    queryKey: ["products", "light"],
-    queryFn: () => fetchProductsLight(500),
+  // Fetch products for selectors - using high limit to get all products
+  const { data: productsResponse, isLoading: productsLoading, error: productsError } = useQuery({
+    queryKey: ["products", "light", "external-order"],
+    queryFn: async () => {
+      try {
+        const result = await fetchProductsPage({
+          pagination: { page: 1, limit: 1000 }, // High limit to get all products
+          sort: { column: "created_at", direction: "desc" },
+        });
+        return result?.data || [];
+      } catch (error) {
+        console.error("Failed to fetch products:", error);
+        throw error;
+      }
+    },
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
+  
+  const productsList = productsResponse || [];
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
   const [selectedProductDetails, setSelectedProductDetails] = useState<
     Record<number, any>
@@ -468,8 +484,13 @@ export default function AddExternalOrderPage() {
                         <div className="md:col-span-2">
                           <Label>Product *</Label>
                           <div>
+                            {productsError && (
+                              <div className="text-sm text-red-500 mb-2">
+                                Failed to load products. Please refresh the page.
+                              </div>
+                            )}
                             <ProductSelect
-                              products={productsList || []}
+                              products={(productsList || []) as Product[]}
                               isLoading={productsLoading}
                               selectedProduct={selectedProducts[index]}
                               onSelect={async (product) => {
@@ -484,6 +505,23 @@ export default function AddExternalOrderPage() {
                                   product.name
                                 );
                                 handleItemChange(index, "price", product.price);
+                                // Store product_id for proper linking
+                                handleItemChange(
+                                  index,
+                                  "product_id",
+                                  product.id
+                                );
+                                // Clear variation when product changes
+                                handleItemChange(
+                                  index,
+                                  "variation_name",
+                                  ""
+                                );
+                                handleItemChange(
+                                  index,
+                                  "product_variation_id",
+                                  ""
+                                );
                                 // fetch product details to get variants and images
                                 try {
                                   const details = await fetchProductForEdit(
@@ -529,6 +567,26 @@ export default function AddExternalOrderPage() {
                                     title="Product Variant"
                                     onChange={(e) => {
                                       const vIdx = parseInt(e.target.value);
+                                      if (vIdx === -1) {
+                                        // Clear variation when "Select variant" is chosen
+                                        handleItemChange(
+                                          index,
+                                          "variation_name",
+                                          ""
+                                        );
+                                        handleItemChange(
+                                          index,
+                                          "product_variation_id",
+                                          ""
+                                        );
+                                        // Reset price to base product price
+                                        handleItemChange(
+                                          index,
+                                          "price",
+                                          selectedProducts[index].price ?? 0
+                                        );
+                                        return;
+                                      }
                                       const variation =
                                         selectedProductDetails[index]
                                           .variations[vIdx];
@@ -539,6 +597,11 @@ export default function AddExternalOrderPage() {
                                           Object.values(
                                             variation.attributes
                                           ).join(" / ")
+                                        );
+                                        handleItemChange(
+                                          index,
+                                          "product_variation_id",
+                                          variation.id || ""
                                         );
                                         handleItemChange(
                                           index,

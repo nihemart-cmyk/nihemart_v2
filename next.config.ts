@@ -13,10 +13,22 @@ const nextConfig: NextConfig = {
     minimumCacheTTL: 60,
     remotePatterns: [
       {
-        protocol: "https", // or 'https'
-        hostname: "**", // Allows any hostname
-        port: "", // Optional: specify port if needed
-        pathname: "**", // Allows any path
+        protocol: "https",
+        hostname: "**",
+        port: "",
+        pathname: "**",
+      },
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "4000",
+        pathname: "/uploads/**",
+      },
+      {
+        protocol: "http",
+        hostname: "127.0.0.1",
+        port: "4000",
+        pathname: "/uploads/**",
       },
     ],
   },

@@ -9,6 +9,7 @@ export interface ExternalOrderItemInput {
    price: number;
    product_id?: string;
    variation_name?: string;
+   product_variation_id?: string;
 }
 
 export interface ExternalOrderInput {
@@ -116,6 +117,7 @@ export async function createExternalOrder(
       product_id: item.product_id,
       product_name: item.product_name,
       variation_name: item.variation_name,
+      product_variation_id: item.product_variation_id || null,
       price: item.price,
       quantity: item.quantity,
       total: item.price * item.quantity,

@@ -22,11 +22,13 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthStore } from "@/store/auth.store";
 import { supabase } from "@/integrations/supabase/client";
+import { useCreateRider } from "@/hooks/useRiders";
 
 const NewRiderPage = () => {
    const router = useRouter();
    const { session } = useAuth();
    const { token } = useAuthStore();
+   const createRider = useCreateRider();
    const [email, setEmail] = useState("");
    const [password, setPassword] = useState("");
    const [fullName, setFullName] = useState("");
@@ -37,7 +39,7 @@ const NewRiderPage = () => {
    const [notes, setNotes] = useState("");
    const [location, setLocation] = useState("");
    const [imageFile, setImageFile] = useState<File | null>(null);
-   const [loading, setLoading] = useState(false);
+   const loading = createRider.isPending;
    const [error, setError] = useState("");
    const [message, setMessage] = useState("");
 
@@ -164,29 +166,14 @@ const NewRiderPage = () => {
             }
          }
 
-         const res = await fetch("/api/admin/create-rider", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-               full_name: fullName,
-               phone,
-               vehicle,
-               email,
-               password,
-               active,
-               image_url: imageUrl,
-               location,
-            }),
+         await createRider.mutateAsync({
+            fullName,
+            phone,
+            vehicle,
+            imageUrl,
+            location,
+            active,
          });
-
-         const data = await res.json();
-         if (!res.ok) {
-            const err = data?.error || "Failed to create rider";
-            setError(err);
-            toast.error(err);
-            setLoading(false);
-            return;
-         }
 
          setMessage(
             "Rider created successfully. Rider can sign in with the email and password provided."
@@ -205,11 +192,9 @@ const NewRiderPage = () => {
          router.push("/admin/riders");
       } catch (err: any) {
          console.error(err);
-         const msg = err?.message || "Failed to create rider";
+         const msg = err?.response?.data?.message || err?.message || "Failed to create rider";
          setError(msg);
          toast.error(msg);
-      } finally {
-         setLoading(false);
       }
    };
 

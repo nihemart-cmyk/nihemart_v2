@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import {
   fetchStoreProductById,
   fetchAllProductIds,
-} from "@/integrations/supabase/store";
+} from "@/lib/api/products";
 import ProductClientPage from "./product-client-page";
 
 // Make this page dynamic to avoid build-time database calls
@@ -99,13 +99,10 @@ export async function generateMetadata({ params }: any): Promise<Metadata> {
 // Generate static params for all products (only if database is available during build)
 export async function generateStaticParams() {
   try {
-    // Only attempt to fetch product IDs if we have the necessary environment variables
-    if (
-      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    ) {
+    // Only attempt to fetch product IDs if we have the API base URL
+    if (!process.env.NEXT_PUBLIC_API_BASE) {
       console.warn(
-        "Supabase environment variables not available during build, skipping static param generation"
+        "API base URL not available during build, skipping static param generation"
       );
       return [];
     }

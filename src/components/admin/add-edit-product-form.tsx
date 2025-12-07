@@ -68,6 +68,8 @@ async function uploadFileToBucket(file: File, bucket: string): Promise<string> {
   const categoryMap: Record<string, "product" | "rider" | "general"> = {
     "product-images": "product",
     "rider-images": "rider",
+    "product-content-bucket": "general", // For Quill editor images in product description
+    "category-images": "general",
   };
   
   const category = categoryMap[bucket] || "general";

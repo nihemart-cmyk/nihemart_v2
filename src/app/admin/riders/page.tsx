@@ -5,6 +5,8 @@ import Link from "next/link";
 import useRiders, {
   useAssignOrder,
   useRiderAssignments,
+  useUpdateRider,
+  useDeleteRider,
 } from "@/hooks/useRiders";
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -124,39 +126,22 @@ const RidersPage = () => {
   const [topRider, setTopRider] = useState<any | null>(null);
   const fetchTopRider = async () => {
     try {
-      const res = await fetch("/api/admin/riders/top-amount");
-      if (!res.ok) {
-        console.error("Top rider API failed:", res.status, res.statusText);
-        throw new Error("Failed to fetch top rider");
-      }
-      const d = await res.json();
-      console.log("Top rider data received:", d);
-      // API returns { topRiderId, topAmount, deliveryCount }
-      if (d && d.topRiderId) {
-        // fetch rider details
-        const r = riders.find((x: any) => x.id === d.topRiderId);
+      const { riderAPI } = await import("@/hooks/useRiders");
+      const topRiders = await riderAPI.getTopRidersByAmount(1, 7);
+      if (topRiders && topRiders.length > 0) {
+        const top = topRiders[0];
+        const r = riders.find((x: any) => x.id === top.id);
         if (r) {
           setTopRider({
             ...r,
-            deliveredCount: d.deliveryCount || d.topAmount,
+            deliveredCount: top.amount,
           });
         } else {
-          // fallback to server API to fetch rider row by id
-          const rr = await fetch(
-            `/api/admin/riders?rid=${encodeURIComponent(d.topRiderId)}`
-          );
-          if (rr.ok) {
-            const jr = await rr.json();
-            setTopRider({
-              ...(jr.rider || {}),
-              deliveredCount: d.deliveryCount || d.topAmount,
-            });
-          } else {
-            setTopRider({
-              id: d.topRiderId,
-              deliveredCount: d.deliveryCount || d.topAmount,
-            });
-          }
+          setTopRider({
+            id: top.id,
+            name: top.name,
+            deliveredCount: top.amount,
+          });
         }
       } else {
         setTopRider(null);
@@ -191,16 +176,10 @@ const RidersPage = () => {
       return;
     }
     try {
-      const res = await fetch(
-        `/api/admin/rider-assignments?ids=${encodeURIComponent(
-          riderIds.join(",")
-        )}`
+      const { authorizedAPI } = await import("@/lib/api");
+      const json = await authorizedAPI.get(
+        `/riders/assignments/batch?ids=${encodeURIComponent(riderIds.join(","))}`
       );
-      if (!res.ok) {
-        console.error("Failed to fetch batched assignments", res.status);
-        return;
-      }
-      const json = await res.json();
       setLatestAssignmentsMap(json.assignments || {});
     } catch (err) {
       console.error("fetchLatestAssignmentsForPage error", err);
@@ -414,14 +393,10 @@ const RidersPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/admin/riders/earnings");
-        if (!res.ok) {
-          console.error("Earnings API failed:", res.status, res.statusText);
-          return;
-        }
-        const j = await res.json();
-        console.log("Earnings data received:", j);
-        setEarningsMap(j.earnings || {});
+        const { riderAPI } = await import("@/hooks/useRiders");
+        const earnings = await riderAPI.getRiderEarnings(7);
+        console.log("Earnings data received:", earnings);
+        setEarningsMap(earnings || {});
       } catch (e) {
         console.error("Earnings fetch error:", e);
       }
@@ -828,18 +803,13 @@ export default RidersPageWrapper;
 
 // Controller component: handles toggling active state with confirmation dialog
 function ToggleActiveController({ confirm, setConfirm, qc, refetch }: any) {
+  const updateRider = useUpdateRider();
   const mutation = useMutation({
     mutationFn: async ({ riderId, newState }: any) => {
-      const res = await fetch("/api/admin/update-rider", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ riderId, updates: { active: newState } }),
+      return await updateRider.mutateAsync({
+        riderId,
+        updates: { active: newState },
       });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || "Failed to update rider");
-      }
-      return res.json();
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["riders"] });
@@ -848,7 +818,7 @@ function ToggleActiveController({ confirm, setConfirm, qc, refetch }: any) {
     },
     onError: (err: any) => {
       console.error(err);
-      toast.error(err?.message || "Failed to update rider");
+      toast.error(err?.response?.data?.message || err?.message || "Failed to update rider");
     },
   });
 
@@ -890,18 +860,10 @@ function ToggleActiveController({ confirm, setConfirm, qc, refetch }: any) {
 
 // Controller component: handles deleting rider with confirmation
 function DeleteRiderController({ confirm, setConfirm, qc, refetch }: any) {
+  const deleteRider = useDeleteRider();
   const mutation = useMutation({
     mutationFn: async ({ riderId }: any) => {
-      const res = await fetch("/api/admin/delete-rider", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ riderId }),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || "Failed to delete rider");
-      }
-      return res.json();
+      return await deleteRider.mutateAsync(riderId);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["riders"] });
@@ -910,7 +872,7 @@ function DeleteRiderController({ confirm, setConfirm, qc, refetch }: any) {
     },
     onError: (err: any) => {
       console.error(err);
-      toast.error(err?.message || "Failed to delete rider");
+      toast.error(err?.response?.data?.message || err?.message || "Failed to delete rider");
     },
   });
 

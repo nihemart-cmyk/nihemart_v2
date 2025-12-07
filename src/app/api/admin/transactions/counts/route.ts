@@ -1,36 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { getTransactionCountsByStatusServer } from '@/integrations/supabase/transactions-server';
 import { logger } from '@/lib/logger';
+import { API_BASE } from '@/lib/api';
 
-// Create service role client for admin operations
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  // avoid throwing at module init
-}
-const serviceSupabase = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-  ? createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    )
-  : (null as any);
-
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Check if service role client is available
-    if (!serviceSupabase) {
-      return NextResponse.json({ 
-        error: 'Service role not configured' 
-      }, { status: 500 });
+    // Get auth token from request headers
+    const authHeader = request.headers.get('authorization');
+    const token = authHeader?.replace('Bearer ', '');
+
+    logger.info('api', 'Fetching transaction counts from backend');
+
+    // Call backend API to get all payments
+    const backendUrl = `${API_BASE}/payments`;
+    const response = await fetch(backendUrl, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend API returned ${response.status}`);
     }
 
-    logger.info('api', 'Fetching transaction counts by status');
+    const backendData = await response.json();
+    const payments = backendData.data || [];
 
-    // Fetch transaction counts using service role client
-    const counts = await getTransactionCountsByStatusServer(serviceSupabase);
+    // Count by status
+    const counts = {
+      pending: 0,
+      completed: 0,
+      failed: 0,
+      timeout: 0,
+      total: payments.length,
+    };
 
-    logger.info('api', 'Transaction counts fetched successfully', { counts });
+    payments.forEach((payment: any) => {
+      const status = payment.status?.toLowerCase();
+      if (status === 'pending') counts.pending++;
+      else if (status === 'completed') counts.completed++;
+      else if (status === 'failed') counts.failed++;
+      else if (status === 'timeout') counts.timeout++;
+    });
 
-    return NextResponse.json(counts);
+    // Also add 'all' count for compatibility
+    const result = {
+      all: counts.total,
+      pending: counts.pending,
+      completed: counts.completed,
+      failed: counts.failed,
+      timeout: counts.timeout,
+      total: counts.total,
+    };
+
+    logger.info('api', 'Transaction counts fetched successfully', result);
+
+    return NextResponse.json(result);
 
   } catch (error) {
     logger.error('api', 'Failed to fetch transaction counts', {
@@ -38,9 +63,14 @@ export async function GET() {
       stack: error instanceof Error ? error.stack : undefined,
     });
 
-    return NextResponse.json(
-      { error: 'Failed to fetch transaction counts' },
-      { status: 500 }
-    );
+    // Return empty counts instead of error to prevent UI crashes
+    return NextResponse.json({
+      all: 0,
+      pending: 0,
+      completed: 0,
+      failed: 0,
+      timeout: 0,
+      total: 0,
+    });
   }
 }

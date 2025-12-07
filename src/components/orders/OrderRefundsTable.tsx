@@ -22,6 +22,7 @@ import {
    PaginationPrevious,
    PaginationNext,
 } from "@/components/ui/pagination";
+import refundsAPI from "@/lib/api/refunds";
 
 export default function OrderRefundsTable() {
    const [page, setPage] = useState(1);
@@ -42,41 +43,23 @@ export default function OrderRefundsTable() {
    const fetchOrders = async () => {
       setLoading(true);
       try {
-         // Build query and include refundStatus only when a specific status is selected.
-         const q = new URLSearchParams();
-         q.set("page", String(page));
-         q.set("limit", String(limit));
-         q.set("type", "orders");
-         if (statusFilter) q.set("refundStatus", statusFilter);
+         // Note: Backend may need a separate endpoint for order refunds
+         // For now, we'll use the items endpoint and filter client-side if needed
+         const refundsAPI = (await import("@/lib/api/refunds")).default;
+         const response = await refundsAPI.getRefundedItems({
+            type: "orders",
+            status: statusFilter as any,
+            page,
+            limit,
+         });
 
-         const res = await fetch(`/api/admin/refunds?${q.toString()}`);
-         if (!res.ok) throw new Error("Failed to load order refunds");
-         const json = await res.json();
-         let payload: any = [];
-         let countVal: any = 0;
-
-         const top = json;
-         const d = top.data;
-
-         if (Array.isArray(d)) payload = d;
-         else if (d && typeof d === "object") {
-            payload = d.orders ?? d.items ?? d.rows ?? d.data ?? [];
-            countVal = d.count ?? d.total ?? d.total_count ?? countVal;
-         }
-
-         payload = payload.length
-            ? payload
-            : top.data ?? top.orders ?? top.items ?? top.rows ?? [];
-         countVal =
-            countVal ||
-            (top.count ?? top.total ?? top.meta?.count ?? top.total_count ?? 0);
-
-         const rows = Array.isArray(payload) ? payload : [];
-         setOrders(rows);
-         setCount(Number(countVal) || rows.length || 0);
+         setOrders(response.data || []);
+         setCount(response.count || 0);
       } catch (err: any) {
          console.error("Failed to fetch order refunds:", err);
-         toast.error(err?.message || "Failed to load order refunds");
+         toast.error(err?.response?.data?.message || err.message || "Failed to load order refunds");
+         setOrders([]);
+         setCount(0);
       } finally {
          setLoading(false);
       }

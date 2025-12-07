@@ -845,54 +845,24 @@ const CheckoutPage = ({
                                  {
                                     onSuccess: async (createdOrder: any) => {
                                        try {
-                                          // Attempt to link payment to order
+                                          // Payment-order linking is handled automatically by the backend
+                                          // when creating orders from payment sessions, so no manual linking needed
+                                          // Clean up session storage reference if present
                                           const ref =
                                              typeof window !== "undefined"
                                                 ? sessionStorage.getItem(
                                                      "kpay_reference"
                                                   )
                                                 : null;
-
-                                          let linkSucceeded = false;
-                                          if (!ref) {
-                                             linkSucceeded = true;
-                                          } else {
+                                          if (ref) {
                                              try {
-                                                const linkResp = await fetch(
-                                                   "/api/payments/link",
-                                                   {
-                                                      method: "POST",
-                                                      headers: {
-                                                         "Content-Type":
-                                                            "application/json",
-                                                      },
-                                                      body: JSON.stringify({
-                                                         orderId:
-                                                            createdOrder.id,
-                                                         reference: ref,
-                                                      }),
-                                                   }
-                                                );
-                                                if (linkResp.ok) {
-                                                   linkSucceeded = true;
-                                                }
-                                             } catch (linkErr) {
-                                                console.error(
-                                                   "Linking payment failed during finalize auto-create:",
-                                                   linkErr
-                                                );
-                                             }
-                                          }
-
-                                          if (linkSucceeded) {
-                                             try {
-                                                clearAllCheckoutClientState();
+                                                sessionStorage.removeItem("kpay_reference");
                                              } catch (e) {}
-                                          } else {
-                                             toast(
-                                                "Order created but payment linking did not complete. Your checkout data has been preserved — please check your orders page or retry linking from the payment page."
-                                             );
                                           }
+
+                                          try {
+                                             clearAllCheckoutClientState();
+                                          } catch (e) {}
 
                                           toast.success(
                                              `Order #${createdOrder.order_number} has been created successfully!`

@@ -196,11 +196,24 @@ export const columns: ColumnDef<Payment>[] = [
    {
       accessorKey: "created_at",
       header: "DATE",
-      cell: ({ row }) => (
-         <span className="text-text-secondary">
-            {format(new Date(row.getValue("created_at")), "MMM d, yyyy, HH:mm")}
-         </span>
-      ),
+      cell: ({ row }) => {
+         const dateValue = row.getValue("created_at") || row.original.createdAt || row.original.created_at;
+         if (!dateValue) return <span className="text-text-secondary">—</span>;
+         
+         try {
+            const date = new Date(dateValue);
+            if (isNaN(date.getTime())) {
+               return <span className="text-text-secondary">—</span>;
+            }
+            return (
+               <span className="text-text-secondary">
+                  {format(date, "MMM d, yyyy, HH:mm")}
+               </span>
+            );
+         } catch (error) {
+            return <span className="text-text-secondary">—</span>;
+         }
+      },
    },
    {
       accessorKey: "amount",

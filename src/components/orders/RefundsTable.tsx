@@ -24,6 +24,7 @@ import { ManageRefundDialog } from "./ManageRefundDialog";
 import { OrderDetailsDialog } from "./OrderDetailsDialog";
 import { ItemDetailsDialog } from "./ItemDetailsDialog";
 import { toast } from "sonner";
+import refundsAPI from "@/lib/api/refunds";
 
 interface RefundsTableProps {}
 
@@ -49,42 +50,20 @@ export const RefundsTable: React.FC<RefundsTableProps> = () => {
    const fetchRefunded = async () => {
       setLoading(true);
       try {
-         // build query similar to history page and be tolerant to different response shapes
-         const q = new URLSearchParams();
-         q.set("page", String(page));
-         q.set("limit", String(limit));
-         if (statusFilter) q.set("refundStatus", statusFilter);
+         const response = await refundsAPI.getRefundedItems({
+            type: "items",
+            status: statusFilter as any,
+            page,
+            limit,
+         });
 
-         const res = await fetch(`/api/admin/refunds?${q.toString()}`);
-         if (!res.ok) throw new Error("Failed to load refunded items");
-         const json = await res.json();
-         // support multiple possible payload shapes, including nested data objects
-         let payload: any = [];
-         let countVal: any = 0;
-
-         const top = json;
-         const d = top.data;
-
-         if (Array.isArray(d)) payload = d;
-         else if (d && typeof d === "object") {
-            payload = d.items ?? d.orders ?? d.rows ?? d.data ?? [];
-            countVal = d.count ?? d.total ?? d.total_count ?? countVal;
-         }
-
-         // fallback to top-level fields
-         payload = payload.length
-            ? payload
-            : top.data ?? top.items ?? top.orders ?? top.rows ?? [];
-         countVal =
-            countVal ||
-            (top.count ?? top.total ?? top.meta?.count ?? top.total_count ?? 0);
-
-         const rows = Array.isArray(payload) ? payload : [];
-         setItems(rows);
-         setCount(Number(countVal) || rows.length || 0);
+         setItems(response.data || []);
+         setCount(response.count || 0);
       } catch (err: any) {
          console.error("Failed to fetch refunded items:", err);
-         toast.error(err?.message || "Failed to load refunds");
+         toast.error(err?.response?.data?.message || err.message || "Failed to load refunds");
+         setItems([]);
+         setCount(0);
       } finally {
          setLoading(false);
       }

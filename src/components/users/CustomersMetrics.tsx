@@ -38,7 +38,11 @@ const CustomersMetrics: FC<CustomersMetricsProps> = ({}) => {
   } = useOrderStats();
 
   // Filter to only show users with role "user" (customers)
-  const customerUsers = users?.filter((u) => u.role === "user") || [];
+  // Backend returns roles as array, frontend might have role as string
+  const customerUsers = users?.filter((u) => {
+    const roles = u.roles || (u.role ? [u.role] : []);
+    return roles.includes("user") || u.role === "user";
+  }) || [];
 
   // Compute metrics from users and order stats (support camelCase and snake_case)
   const totalCustomers = customerUsers.length;
@@ -64,6 +68,11 @@ const CustomersMetrics: FC<CustomersMetricsProps> = ({}) => {
   const cancelled = Number(
     statsData?.cancelledOrders ?? statsData?.cancelled_orders ?? 0
   );
+  
+  // Calculate completion rate
+  const completionRate = totalOrders > 0 
+    ? ((completedOrders / totalOrders) * 100).toFixed(1)
+    : "0";
 
   // Mock small growth numbers only when we don't have previous period info
   const totalGrowth = 0;
@@ -86,7 +95,7 @@ const CustomersMetrics: FC<CustomersMetricsProps> = ({}) => {
     {
       title: "Completed Orders",
       value: formatNumber(completedOrders),
-      change: "0%",
+      change: `${completionRate}%`,
       isPositive: true,
       period: "Completion Rate",
     },

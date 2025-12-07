@@ -1,5 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { createClient } from "@supabase/supabase-js";
+import { API_BASE } from "@/lib/api";
+
+// Helper to extract auth token from request
+function getAuthToken(req: NextApiRequest): string | null {
+   const authHeader = req.headers.authorization;
+   if (authHeader && authHeader.startsWith("Bearer ")) {
+      return authHeader.slice(7);
+   }
+   return null;
+}
 
 export default async function handler(
    req: NextApiRequest,
@@ -15,36 +24,36 @@ export default async function handler(
       return res.status(400).json({ error: "Order ID is required" });
    }
 
-   // Use service role client if available
-   const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-   const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-   const supabase = createClient(
-      SUPABASE_URL || "",
-      SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY || ""
-   );
-
    try {
-      // Return the full order row including related order_items so clients
-      // requesting /api/orders/:id for retry purposes receive the items,
-      // totals and payment metadata they expect.
-      const { data: order, error } = await supabase
-         .from("orders")
-         .select("*, items:order_items(*)")
-         .eq("id", id)
-         .maybeSingle();
+      // Get auth token from request headers
+      const authToken = getAuthToken(req);
 
-      if (error) {
-         console.error("Error fetching order:", error);
-         return res.status(500).json({ error: "Failed to fetch order" });
+      // Call backend API
+      const backendUrl = `${API_BASE}/orders/${id}`;
+      const backendResponse = await fetch(backendUrl, {
+         method: "GET",
+         headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+         },
+      });
+
+      const backendData = await backendResponse.json();
+
+      if (!backendResponse.ok) {
+         console.error("Backend order fetch failed:", {
+            orderId: id,
+            status: backendResponse.status,
+            error: backendData.message || backendData.error,
+         });
+         return res.status(backendResponse.status).json({
+            error: backendData.message || backendData.error || "Failed to fetch order",
+         });
       }
 
-      if (!order) {
-         return res.status(404).json({ error: "Order not found" });
-      }
-
-      res.status(200).json(order);
+      // Transform backend response to match frontend expectations
+      // Backend returns order with items array, which matches what frontend expects
+      res.status(200).json(backendData);
    } catch (err: any) {
       console.error("Order API error:", err);
       res.status(500).json({ error: err?.message || "Server error" });

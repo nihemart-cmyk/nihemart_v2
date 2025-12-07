@@ -33,11 +33,11 @@ import StatsGrid from "@/components/admin/StatsGrid";
 import { format } from "date-fns";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { fetchRiders } from "@/integrations/supabase/riders";
+import { useRiders } from "@/hooks/useRiders";
 import { useUsers } from "@/hooks/useUsers";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-const sb = supabase as any;
+import dashboardAPI from "@/lib/api/dashboard";
+import { useOrders } from "@/hooks/useOrders";
 import {
   Area,
   AreaChart,
@@ -134,57 +134,31 @@ const DashboardContent: React.FC = () => {
   // Compute the actual date range based on filter type
   const dateRange = getDateRangeFromFilter(filterType, customDateRange);
 
-  // Fetch data with optimized queries
-  const { data: ordersResponse, isLoading: ordersLoading } = useQuery({
-    queryKey: ["admin-orders", filterType, dateRange?.from, dateRange?.to],
-    queryFn: async () => {
-      let query = sb
-        .from("orders")
-        .select(
-          `
-               *,
-               order_items (
-                  *,
-                  product:products(*),
-                  product_variation:product_variations(*)
-               ),
-               payments (*)
-            `
-        )
-        .order("created_at", { ascending: false });
-
-      if (dateRange?.from) {
-        query = query.gte("created_at", dateRange.from.toISOString());
-      }
-      if (dateRange?.to) {
-        // Add 1 day to include the entire end date
-        const endDate = new Date(dateRange.to);
-        endDate.setDate(endDate.getDate() + 1);
-        query = query.lt("created_at", endDate.toISOString());
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data as any[];
+  // Fetch data with optimized queries using backend API
+  const { useAllOrders } = useOrders();
+  const ordersQuery = useAllOrders({
+    filters: {
+      dateFrom: dateRange?.from?.toISOString(),
+      dateTo: dateRange?.to?.toISOString(),
     },
-    staleTime: 10 * 60 * 1000, // 10 minutes - orders change more frequently
-    gcTime: 30 * 60 * 1000, // 30 minutes
-    refetchOnWindowFocus: false, // Don't refetch on window focus for admin dashboard
-    refetchOnReconnect: true, // Refetch when connection restored
-    refetchInterval: 2 * 60 * 1000, // Background refetch every 2 minutes for fresh order data
-    refetchIntervalInBackground: true, // Continue refetching even when tab is not active
+    // No pagination to get all orders for dashboard
   });
+  const ordersResponse = ordersQuery.data;
+  const ordersLoading = ordersQuery.isLoading;
 
+  // Products are fetched via products API - using a simplified query for dashboard
   const { data: productsResponse, isLoading: productsLoading } = useQuery({
     queryKey: ["admin-products"],
     queryFn: async () => {
-      const { data, error } = await sb
-        .from("products")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50); // Reduce limit for faster loading
-      if (error) throw error;
-      return data as any[];
+      // Use products API if available, otherwise return empty array
+      try {
+        const productsAPI = (await import("@/lib/api/products")).default;
+        const response = await productsAPI.fetchProductsPage({ page: 1, limit: 50 });
+        return response.data || [];
+      } catch (error) {
+        console.error("Error fetching products:", error);
+        return [];
+      }
     },
     staleTime: 30 * 60 * 1000, // 30 minutes - products don't change often
     gcTime: 60 * 60 * 1000, // 1 hour
@@ -201,23 +175,10 @@ const DashboardContent: React.FC = () => {
         dateRange?.to,
       ],
       queryFn: async () => {
-        // 1. Prepare parameters for the RPC call. Pass null if date is not set.
-        const params = {
-          start_date: dateRange?.from ? dateRange.from.toISOString() : null,
-          end_date: dateRange?.to ? dateRange.to.toISOString() : null,
-        };
-
-        // 2. Call the RPC function with the parameters.
-        const { data, error } = await sb.rpc("get_top_products", params);
-
-        // 3. Handle error and return data.
-        if (error) {
-          console.error("Error fetching top products:", error);
-          throw error;
-        }
-
-        // The data is already sorted and contains all the info you need.
-        return (data || []) as TopProduct[];
+        return await dashboardAPI.getTopProducts(
+          dateRange?.from,
+          dateRange?.to
+        );
       },
       staleTime: 15 * 60 * 1000, // 15 minutes
       gcTime: 30 * 60 * 1000, // 30 minutes
@@ -234,22 +195,13 @@ const DashboardContent: React.FC = () => {
       dateRange?.to,
     ],
     queryFn: async () => {
-      let query = sb
-        .from("profiles")
-        .select("id", { count: "exact", head: true });
-
-      if (dateRange?.from) {
-        query = query.gte("created_at", dateRange.from.toISOString());
-      }
-      if (dateRange?.to) {
-        const endDate = new Date(dateRange.to);
-        endDate.setDate(endDate.getDate() + 1);
-        query = query.lt("created_at", endDate.toISOString());
-      }
-
-      const { count, error } = await query;
-      if (error) throw error;
-      return count || 0;
+      const userAPI = (await import("@/lib/api/users")).default;
+      const response = await userAPI.getAllUsers({
+        fromDate: dateRange?.from || undefined,
+        toDate: dateRange?.to || undefined,
+        limit: 1, // Just to get count
+      });
+      return response.total_count || 0;
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000, // 1 hour
@@ -260,18 +212,7 @@ const DashboardContent: React.FC = () => {
   const { data: usersResponse, isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: async () => {
-      const { data, error } = await sb
-        .from("profiles")
-        .select(
-          `
-               *,
-               user_roles (role)
-            `
-        )
-        .order("created_at", { ascending: false })
-        .limit(5); // Limit for performance
-      if (error) throw error;
-      return data as any[];
+      return await dashboardAPI.getRecentUsers(5);
     },
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000, // 1 hour
@@ -279,49 +220,17 @@ const DashboardContent: React.FC = () => {
     refetchOnReconnect: true,
   });
 
-  const { data: recentUsersResponse, isLoading: recentUsersLoading } = useQuery(
-    {
-      queryKey: ["admin-recent-users"],
-      queryFn: async () => {
-        const { data, error } = await sb
-          .from("profiles")
-          .select("id, full_name, created_at")
-          .order("created_at", { ascending: false })
-          .limit(5);
-        console.log({ data, error });
-        if (error) throw error;
-        return data as any[];
-      },
-      staleTime: 30 * 60 * 1000, // 30 minutes
-      gcTime: 60 * 60 * 1000, // 1 hour
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
-    }
-  );
+  const topUsersResponse = usersResponse || [];
+  const topUsersLoading = usersLoading;
 
-  console.log("Recent Users Response:", recentUsersResponse);
+  const { data: ridersResponse, isLoading: ridersLoading } = useRiders();
 
-  const topUsersResponse = recentUsersResponse || [];
-  const topUsersLoading = recentUsersLoading;
-
-  const { data: ridersResponse, isLoading: ridersLoading } = useQuery({
-    queryKey: ["admin-riders"],
-    queryFn: () => fetchRiders(),
-    staleTime: 30 * 60 * 1000, // 30 minutes
-    gcTime: 60 * 60 * 1000, // 1 hour
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: true,
-  });
-
+  // Earnings calculation - can be derived from orders if backend doesn't have dedicated endpoint
   const { data: earningsResponse, isLoading: earningsLoading } = useQuery({
     queryKey: ["admin-riders-earnings"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/riders/earnings");
-      if (!res.ok) {
-        throw new Error("Failed to fetch earnings");
-      }
-      const j = await res.json();
-      return j.earnings || {};
+      const { riderAPI } = await import("@/hooks/useRiders");
+      return await riderAPI.getRiderEarnings(7);
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
@@ -329,11 +238,11 @@ const DashboardContent: React.FC = () => {
     refetchOnReconnect: true,
   });
 
-  const orders = ordersResponse || [];
+  const orders = ordersResponse?.data || [];
   const products = productsResponse || [];
   const users = usersResponse || [];
   const totalUsers = totalUsersCount || 0;
-  const riders = ridersResponse || [];
+  const riders = ridersResponse?.data || ridersResponse || [];
   const topProducts = topProductsResponse || [];
   const topUsers = topUsersResponse || [];
   const earnings = earningsResponse || {};
@@ -442,33 +351,26 @@ const DashboardContent: React.FC = () => {
   // Top users are already fetched
   const filteredUsers = topUsers.slice(0, 5);
 
-  // Get top riders based on earnings
+  // Get top riders - use backend API
+  const { data: topRidersData, isLoading: topRidersLoading } = useQuery({
+    queryKey: ["admin-top-riders"],
+    queryFn: async () => {
+      const { riderAPI } = await import("@/hooks/useRiders");
+      return await riderAPI.getTopRidersByAmount(5, 7);
+    },
+    staleTime: 10 * 60 * 1000, // 10 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
+  });
+
   const topRiders = useMemo(() => {
-    // Use earnings map directly
-    const riderEarnings = earnings as Record<string, number>;
-
-    // Get top 5 riders by earnings
-    const topRiderIds = Object.entries(riderEarnings)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([id]) => id);
-
-    return riders
-      .filter((rider) => rider.active && topRiderIds.includes(rider.id))
-      .sort((a, b) => (riderEarnings[b.id] || 0) - (riderEarnings[a.id] || 0))
-      .slice(0, 5)
-      .map((rider) => ({
-        name: rider.full_name || "Unknown Rider",
-        code: "Rider",
-        amount: `RWF ${(riderEarnings[rider.id] || 0).toLocaleString()}`,
-        avatar:
-          rider.full_name
-            ?.split(" ")
-            .map((n: string) => n[0])
-            .join("")
-            .toUpperCase() || "R",
-      }));
-  }, [riders, earnings]);
+    if (!topRidersData) return [];
+    return topRidersData.map((rider) => ({
+      name: rider.name,
+      code: rider.code,
+      amount: `RWF ${rider.amount.toLocaleString()}`,
+      avatar: rider.avatar || rider.name?.split(" ").map((n: string) => n[0]).join("").toUpperCase() || "R",
+    }));
+  }, [topRidersData]);
 
   return (
     <div className="h-[calc(100vh-10rem)] p-4 md:p-6">
