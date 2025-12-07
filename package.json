@@ -16,8 +16,8 @@
     "supabase:migrate:status": "supabase migration list",
     "supabase:typegen": "supabase gen types typescript --project-id $(supabase status --json | jq -r .project_id) --schema public > src/supabase/types.ts",
     "supabase:test": "supabase db reset && npm test",
-    "seed:admin": "node scripts/seed-admin.js"
-    ,"toggle:orders": "node scripts/toggle-orders-schedule.js"
+    "seed:admin": "node scripts/seed-admin.js",
+    "toggle:orders": "node scripts/toggle-orders-schedule.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",
@@ -68,6 +68,7 @@
     "react-quilljs": "^2.0.5",
     "recharts": "2.15.4",
     "sharp": "^0.34.4",
+    "socket.io-client": "^4.8.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "xlsx": "^0.18.5",

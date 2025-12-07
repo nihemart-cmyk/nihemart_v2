@@ -149,7 +149,7 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          } catch (e) {
             // ignore cookie errors
          }
-         const { error } = await signIn(email, password);
+         const { error, user: loggedInUser } = await signIn(email, password);
 
          if (error) {
             toast.error(error);
@@ -168,10 +168,15 @@ const AdminSigninForm: FC<AdminSigninFormProps> = ({ redirect }) => {
          if (safeRedirect) {
             router.push(safeRedirect);
          } else {
-            // Fallback to role-based routing
-            if (hasRole("admin")) {
+            // Use the logged-in user's roles from the response for immediate redirection
+            // This avoids race conditions with async state updates
+            const userRoles = loggedInUser?.roles || [];
+            const isAdmin = userRoles.includes("admin");
+            const isRider = userRoles.includes("rider");
+
+            if (isAdmin) {
                router.push("/admin");
-            } else if (hasRole("rider")) {
+            } else if (isRider) {
                router.push("/rider");
             } else {
                router.push("/");

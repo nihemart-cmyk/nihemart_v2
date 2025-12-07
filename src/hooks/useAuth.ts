@@ -328,10 +328,10 @@ export function useAuth() {
       session: authUser ? { user: authUser } : null,
       signIn: async (email: string, password: string) => {
          try {
-            await signInMutation({ email, password });
-            return { error: null };
+            const response = await signInMutation({ email, password });
+            return { error: null, user: response.user };
          } catch (error: any) {
-            return { error: error?.message || "Sign in failed" };
+            return { error: error?.message || "Sign in failed", user: null };
          }
       },
       signUp: async (

@@ -8,7 +8,6 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useCart } from "@/contexts/CartContext";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import Image from "next/image";
 import { optimizeImageUrl } from "@/lib/utils";
 
@@ -86,38 +85,17 @@ const Cart = () => {
 
       fetchOrdersEnabled();
 
-      // Realtime subscription to update banner and button state immediately
-      // when `site_settings.key = 'orders_enabled'` changes.
-      const channel = supabase
-         .channel("cart_site_settings_orders_enabled")
-         .on(
-            "postgres_changes",
-            {
-               event: "*",
-               schema: "public",
-               table: "site_settings",
-               filter: "key=eq.orders_enabled",
-            },
-            (payload: any) => {
-               // On any change to `site_settings` rows related to orders we re-fetch
-               // the canonical combined state from the server so we don't try to
-               // reconstruct schedule/admin logic from a single row's payload.
-               try {
-                  fetchOrdersEnabled();
-               } catch (e) {
-                  // ignore
-               }
-            }
-         )
-         .subscribe();
+      // Poll for order settings changes periodically (every 30 seconds)
+      // This replaces the Supabase realtime subscription
+      const pollInterval = setInterval(() => {
+         if (mounted) {
+            fetchOrdersEnabled();
+         }
+      }, 30000); // Poll every 30 seconds
 
       return () => {
          mounted = false;
-         try {
-            supabase.removeChannel(channel);
-         } catch (e) {
-            // ignore
-         }
+         clearInterval(pollInterval);
       };
    }, []);
 
@@ -253,6 +231,8 @@ const Cart = () => {
                                     }
                                  )}
                                  alt={item.name}
+                                 width={96}
+                                 height={96}
                                  className="w-20 h-20 sm:w-24 sm:h-24 object-cover rounded-md"
                                  onError={(e) => {
                                     (e.target as HTMLImageElement).src =

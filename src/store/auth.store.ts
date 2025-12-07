@@ -53,6 +53,9 @@ export const useAuthStore = create<AuthState>()(
             // Set cookie for middleware access (if in browser)
             if (typeof window !== "undefined") {
                document.cookie = `auth-token=${data.accessToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+               // Initialize Socket.IO connection after login
+               const { initializeSocket } = require("@/lib/socket");
+               initializeSocket();
             }
          },
 
@@ -60,6 +63,11 @@ export const useAuthStore = create<AuthState>()(
 
          setToken: (token) => {
             set({ accessToken: token, token });
+            // Reconnect socket with new token if it changed
+            if (typeof window !== "undefined") {
+               const { reconnectSocket } = require("@/lib/socket");
+               reconnectSocket();
+            }
          },
 
          setRefreshToken: (refreshToken) => {
@@ -79,6 +87,9 @@ export const useAuthStore = create<AuthState>()(
                localStorage.removeItem("auth-storage");
                // Clear auth cookie
                document.cookie = "auth-token=; path=/; max-age=0";
+               // Disconnect socket on logout
+               const { disconnectSocket } = require("@/lib/socket");
+               disconnectSocket();
             }
          },
 
@@ -138,6 +149,12 @@ export const useAuthStore = create<AuthState>()(
                               token: response.accessToken,
                               loading: false,
                            });
+                           
+                           // Reconnect socket with new token
+                           if (typeof window !== "undefined") {
+                              const { reconnectSocket } = require("@/lib/socket");
+                              reconnectSocket();
+                           }
                         } catch (refreshError) {
                            // Refresh failed, clear auth
                            get().clearAuth();

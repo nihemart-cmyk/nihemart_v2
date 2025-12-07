@@ -5,6 +5,9 @@ import { useCurrentUser } from "@/hooks/useAuth";
 // The AuthProvider handles initialization and token refresh
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const { initialize, setAuthData, clearAuth } = useAuthStore();
+  
+  // useCurrentUser will only run if token exists (enabled: !!token)
+  // This should be safe as long as QueryClientProvider wraps this component
   const { data: currentUser, error } = useCurrentUser();
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null

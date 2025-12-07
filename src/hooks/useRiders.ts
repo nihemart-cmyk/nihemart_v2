@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authorizedAPI, unauthorizedAPI } from "@/lib/api";
 import handleApiRequest from "@/lib/handleApiRequest";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthStore } from "@/store/auth.store";
 
 // Types
 export interface Rider {
@@ -173,10 +174,14 @@ export function useRiderById(id: string) {
  * Hook to get my rider profile (rider only)
  */
 export function useMyRiderProfile() {
+   const { token } = useAuthStore();
+   
    return useQuery({
       queryKey: riderKeys.myProfile(),
       queryFn: () => riderAPI.getMyRiderProfile(),
+      enabled: !!token, // Only fetch if user is authenticated
       staleTime: 1000 * 10, // 10 seconds
+      retry: false,
    });
 }
 

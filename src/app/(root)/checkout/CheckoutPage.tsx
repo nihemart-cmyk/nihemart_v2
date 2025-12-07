@@ -14,7 +14,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useOrders } from "@/hooks/useOrders";
 import { useCart } from "@/contexts/CartContext";
 import { useBuyNow } from "@/contexts/BuyNowContext";
-import { supabase } from "@/integrations/supabase/client";
+// Removed Supabase import - no longer using Supabase realtime
 import {
    Collapsible,
    CollapsibleTrigger,
@@ -1341,35 +1341,26 @@ const CheckoutPage = ({
          }
       })();
 
-      // Realtime subscription to site_settings changes
-      const channel = supabase
-         .channel("site_settings_orders_enabled")
-         .on(
-            "postgres_changes",
-            {
-               event: "*",
-               schema: "public",
-               table: "site_settings",
-               filter: "key=eq.orders_enabled",
-            },
-            (payload: any) => {
-               try {
-                  const next = payload?.new?.value;
-                  const enabled =
-                     next === true ||
-                     String(next) === "true" ||
-                     (next && next === "true");
-                  setOrdersEnabled(Boolean(enabled));
-               } catch (e) {}
-            }
-         )
-         .subscribe();
+      // Poll for order settings changes periodically (every 30 seconds)
+      // This replaces the Supabase realtime subscription
+      const pollInterval = setInterval(async () => {
+         if (!mounted) return;
+         try {
+            const res = await fetch("/api/admin/settings/orders-enabled");
+            if (!res.ok) return;
+            const json = await res.json();
+            const enabled =
+               json.adminEnabled === true ||
+               (json.adminEnabled === null && !json.scheduleDisabled);
+            setOrdersEnabled(Boolean(enabled));
+         } catch (e) {
+            // ignore polling errors
+         }
+      }, 30000); // Poll every 30 seconds
 
       return () => {
          mounted = false;
-         try {
-            supabase.removeChannel(channel);
-         } catch (e) {}
+         clearInterval(pollInterval);
       };
    }, []);
 

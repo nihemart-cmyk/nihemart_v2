@@ -1,35 +1,31 @@
 #!/usr/bin/env node
 /**
  * Toggle orders_enabled in the site_settings table based on Kigali local time.
- * This script uses the Supabase service role key and will upsert the
- * `orders_enabled` key to the appropriate boolean value.
+ * This script uses the backend API to update orders enabled status.
  *
  * Environment variables required:
- *  - SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL
- *  - SUPABASE_SERVICE_ROLE_KEY
+ *  - API_BASE_URL or NEXT_PUBLIC_API_BASE or NEXT_PUBLIC_API_URL (defaults to http://localhost:4000/api)
+ *  - ADMIN_API_KEY (optional, for service-to-service auth)
  *
  * Notes:
- *  - This implementation writes the `orders_enabled` key to the DB. That
- *    becomes an "admin"-style override. If you prefer a strict "schedule only"
- *    approach (no DB writes) you can delete the row instead or call the API
- *    with `{ enabled: 'auto' }` when transitioning back to schedule mode.
+ *  - This implementation calls the backend API to update orders_enabled.
+ *  - The backend respects admin overrides and only updates if source is 'schedule'.
+ *  - For strict "schedule only" approach, the backend handles this logic.
  */
-const { createClient } = require("@supabase/supabase-js");
+const API_BASE =
+   process.env.API_BASE_URL ||
+   process.env.NEXT_PUBLIC_API_BASE ||
+   process.env.NEXT_PUBLIC_API_URL ||
+   "http://localhost:4000/api";
 
-const SUPABASE_URL =
-   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SERVICE_KEY = process.env.SERVICE_API_KEY || process.env.ADMIN_API_KEY;
 
-if (!SUPABASE_URL || !SERVICE_KEY) {
+if (!SERVICE_KEY) {
    console.error(
-      "Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY environment variables"
+      "Missing SERVICE_API_KEY or ADMIN_API_KEY environment variable"
    );
    process.exit(1);
 }
-
-const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
-   auth: { persistSession: false, autoRefreshToken: false },
-});
 
 async function main() {
    try {
@@ -65,57 +61,43 @@ async function main() {
          desiredEnabled
       );
 
-      // Respect explicit admin override: if there is an existing source row
-      // set to 'admin', do not overwrite it. Otherwise upsert the boolean
-      // and mark the source as 'schedule' so future runs know this was
-      // written by the scheduler.
-      const { data: sourceRows, error: readError } = await supabase
-         .from("site_settings")
-         .select("key, value")
-         .eq("key", "orders_enabled_source");
+      // Update via backend API scheduler endpoint
+      // This endpoint respects admin overrides and only updates if source is 'schedule'
+      const headers = {
+         "Content-Type": "application/json",
+         "X-Service-Key": SERVICE_KEY,
+      };
 
-      if (readError) {
+      const updateResponse = await fetch(`${API_BASE}/settings/orders-enabled/scheduler`, {
+         method: "POST",
+         headers,
+         body: JSON.stringify({ enabled: desiredEnabled }),
+      });
+
+      if (!updateResponse.ok) {
+         const error = await updateResponse.json().catch(() => ({ error: "Unknown error" }));
          console.error(
-            "Failed to read orders_enabled_source:",
-            readError.message || readError
+            "Failed to update orders_enabled:",
+            error.error || updateResponse.statusText
          );
          process.exitCode = 2;
          return;
       }
 
-      const currentSource =
-         Array.isArray(sourceRows) && sourceRows.length > 0
-            ? sourceRows[0].value
-            : null;
-      if (currentSource === "admin") {
+      const result = await updateResponse.json();
+      
+      // Check if update was skipped due to admin override
+      if (result.source === "admin") {
          console.log(
-            "Admin override present; scheduler will not change orders_enabled."
+            "Admin override present; scheduler did not change orders_enabled."
          );
-         return;
-      }
-
-      // Upsert both the boolean and the source marker
-      const { error } = await supabase.from("site_settings").upsert(
-         [
-            { key: "orders_enabled", value: desiredEnabled },
-            { key: "orders_enabled_source", value: "schedule" },
-         ],
-         { onConflict: "key" }
-      );
-
-      if (error) {
-         console.error(
-            "Failed to update site_settings:",
-            error.message || error
-         );
-         process.exitCode = 2;
          return;
       }
 
       console.log(
-         "Successfully upserted orders_enabled:",
-         desiredEnabled,
-         "(source=schedule)"
+         "Successfully updated orders_enabled:",
+         result.enabled,
+         "(source=" + result.source + ")"
       );
    } catch (err) {
       console.error(

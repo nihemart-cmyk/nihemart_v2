@@ -20,6 +20,8 @@ export async function updateSession(request: NextRequest) {
       "/forgot-password",
       "/reset-password",
       "/error",
+      "/cart", // Allow guest access to cart
+      "/checkout", // Allow guest checkout
       "/api/auth", // Auth API routes are public
    ];
 
@@ -37,13 +39,11 @@ export async function updateSession(request: NextRequest) {
       );
    });
 
-   // Define protected routes
+   // Define protected routes (cart and checkout are public for guest checkout)
    const protectedRoutes = [
       "/profile",
       "/admin",
       "/rider",
-      "/cart",
-      "/checkout",
       "/orders",
       "/addresses",
       "/wishlist",

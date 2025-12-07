@@ -6,11 +6,12 @@ import React, {
    useState,
    useRef,
 } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { getSocket, disconnectSocket, reconnectSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { useMyRiderProfile } from "@/hooks/useRiders";
 import { toast } from "sonner";
 import { formatRiderInfo } from "@/utils/notification-formatters";
+import type { Socket } from "socket.io-client";
 
 type Notification = {
    id: string;
@@ -44,7 +45,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
    const { user, hasRole } = useAuth();
    const [notifications, setNotifications] = useState<Notification[]>([]);
-   const channelRef = useRef<any | null>(null);
+   const socketRef = useRef<Socket | null>(null);
    // compute boolean admin status so the effect can depend on it and re-run
    const isAdmin = Boolean(hasRole && hasRole("admin"));
    
@@ -220,12 +221,10 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
          }
       };
 
-      // NOTE: We avoid aggressive client-side polling. Instead we rely on
-      // Supabase realtime subscriptions targeted by recipient filters.
-      // However, network or websocket problems can cause subscriptions to
-      // silently stop. We'll keep a lightweight heartbeat that falls back
-      // to fetching persisted notifications if no realtime events arrive
-      // within a short window.
+      // NOTE: We use Socket.IO for realtime notifications instead of Supabase.
+      // Socket.IO automatically handles reconnection, so we don't need aggressive polling.
+      // We'll keep a lightweight heartbeat that falls back to fetching persisted notifications
+      // if no realtime events arrive within a short window.
 
       const lastEventAt = { current: Date.now() } as { current: number };
       let heartbeatInterval: any = null;
@@ -237,7 +236,6 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
             try {
                const now = Date.now();
                if (now - lastEventAt.current > 12000) {
-                  // console.debug fallback
                   // eslint-disable-next-line no-console
                   console.debug(
                      "No realtime notifications seen recently — polling for updates"
@@ -255,95 +253,97 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       };
 
       const setupRealtime = () => {
-         // Create a channel scoped to this user for easier cleanup.
-         // Remove any existing channel before creating a fresh one.
-         try {
-            if (channelRef.current) {
-               try {
-                  supabase.removeChannel(channelRef.current);
-               } catch (e) {
-                  channelRef.current.unsubscribe?.();
-               }
-               channelRef.current = null;
+         // Disconnect existing socket if any
+         if (socketRef.current) {
+            try {
+               socketRef.current.disconnect();
+            } catch (e) {}
+            socketRef.current = null;
+         }
+
+         // Initialize Socket.IO connection
+         const socket = getSocket();
+         if (!socket) {
+            console.warn("Failed to initialize Socket.IO connection");
+            return;
+         }
+
+         socketRef.current = socket;
+
+         // Listen for new notifications
+         socket.on("notification:new", (notification: any) => {
+            try {
+               // eslint-disable-next-line no-console
+               console.debug("Socket.IO received notification:new", notification?.id);
+               lastEventAt.current = Date.now();
+               handleRealtimeRow(notification);
+            } catch (e) {
+               console.error("Error handling notification:new", e);
             }
-         } catch {}
+         });
 
-         const ch = supabase.channel(`public:notifications:user:${user.id}`);
-
-         // Subscribe to all INSERT/UPDATE events on notifications table (no server-side filter)
-         // Client-side filtering in handleRealtimeRow ensures only relevant notifications are processed.
-         ch.on(
-            "postgres_changes",
-            {
-               event: "INSERT",
-               schema: "public",
-               table: "notifications",
-            },
-            (payload: any) => {
-               try {
-                  // eslint-disable-next-line no-console
-                  console.debug(
-                     "notifications channel received INSERT",
-                     payload?.new?.id
-                  );
-                  // update last-event timestamp for heartbeat
-                  lastEventAt.current = Date.now();
-               } catch (e) {}
-               handleRealtimeRow(payload.new);
+         // Listen for notification updates
+         socket.on("notification:updated", (notification: any) => {
+            try {
+               // eslint-disable-next-line no-console
+               console.debug("Socket.IO received notification:updated", notification?.id);
+               lastEventAt.current = Date.now();
+               handleRealtimeRow(notification);
+            } catch (e) {
+               console.error("Error handling notification:updated", e);
             }
-         );
+         });
 
-         ch.on(
-            "postgres_changes",
-            {
-               event: "UPDATE",
-               schema: "public",
-               table: "notifications",
-            },
-            (payload: any) => {
-               try {
-                  // eslint-disable-next-line no-console
-                  console.debug(
-                     "notifications channel received UPDATE",
-                     payload?.new?.id
-                  );
-                  // update last-event timestamp for heartbeat
-                  lastEventAt.current = Date.now();
-               } catch (e) {}
-               handleRealtimeRow(payload.new);
+         // Listen for general notification created event (fallback)
+         socket.on("notification:created", (notification: any) => {
+            try {
+               // eslint-disable-next-line no-console
+               console.debug("Socket.IO received notification:created", notification?.id);
+               lastEventAt.current = Date.now();
+               handleRealtimeRow(notification);
+            } catch (e) {
+               console.error("Error handling notification:created", e);
             }
-         );
+         });
 
-         // Finalize subscription and keep a reference for cleanup
-         ch.subscribe();
-         channelRef.current = ch;
-         // start heartbeat to detect silent disconnects
-         startHeartbeat();
-         // debug
-         try {
+         // Handle connection events
+         socket.on("connect", () => {
             // eslint-disable-next-line no-console
-            console.debug("Subscribed to notifications channel:", {
-               channel: `public:notifications:user:${user.id}`,
-               isAdmin,
-               riderId,
-            });
-         } catch (e) {}
+            console.debug("Socket.IO connected for notifications");
+            // Subscribe to notifications
+            socket.emit("subscribe:notifications");
+         });
+
+         socket.on("disconnect", (reason) => {
+            // eslint-disable-next-line no-console
+            console.debug("Socket.IO disconnected:", reason);
+         });
+
+         // Start heartbeat to detect silent disconnects
+         startHeartbeat();
+
+         // eslint-disable-next-line no-console
+         console.debug("Socket.IO notifications setup complete", {
+            userId: user.id,
+            isAdmin,
+            riderId,
+         });
       };
 
       // Reconnect/resubscribe handling: re-setup realtime when browser comes back online
       const handleOnline = () => {
          try {
+            reconnectSocket();
             setupRealtime();
          } catch (e) {
             console.error(
-               "Failed to re-subscribe to notifications channel on online:",
+               "Failed to re-connect Socket.IO on online:",
                e
             );
          }
       };
 
       window.addEventListener("online", handleOnline);
-      // optional: cleanup on offline can be added if needed
 
       const handleRealtimeRow = (row: any) => {
          try {
@@ -527,34 +527,26 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
       return () => {
          try {
-            if (channelRef.current) {
-               try {
-                  // eslint-disable-next-line no-console
-                  console.debug(
-                     "Removing notifications channel",
-                     channelRef.current
-                  );
-                  supabase.removeChannel(channelRef.current);
-               } catch (e) {
-                  try {
-                     // eslint-disable-next-line no-console
-                     console.debug(
-                        "Unsubscribing notifications channel",
-                        channelRef.current
-                     );
-                     channelRef.current.unsubscribe?.();
-                  } catch (e) {}
-               }
-               channelRef.current = null;
-            }
-         } catch (err) {
-            try {
-               channelRef.current?.unsubscribe?.();
-            } catch {}
-         }
-         try {
             stopHeartbeat();
          } catch (e) {}
+         
+         try {
+            if (socketRef.current) {
+               // Remove event listeners
+               socketRef.current.off("notification:new");
+               socketRef.current.off("notification:updated");
+               socketRef.current.off("notification:created");
+               socketRef.current.off("connect");
+               socketRef.current.off("disconnect");
+               
+               // Note: We don't disconnect the socket here as it might be used by other parts
+               // The socket will be cleaned up when the user logs out
+               socketRef.current = null;
+            }
+         } catch (err) {
+            console.error("Error cleaning up Socket.IO:", err);
+         }
+         
          try {
             window.removeEventListener("online", handleOnline);
          } catch {}

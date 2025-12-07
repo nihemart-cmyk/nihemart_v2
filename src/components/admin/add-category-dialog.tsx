@@ -31,7 +31,7 @@ import {
    updateSubcategory,
    deleteSubcategory,
 } from "@/integrations/supabase/subcategories";
-import { supabase } from "@/integrations/supabase/client";
+import { uploadFile } from "@/lib/api/upload";
 import { useDropzone } from "react-dropzone";
 import Image from "next/image";
 import { Upload, X, Plus, Edit, Trash2 } from "lucide-react";
@@ -65,12 +65,15 @@ const uploadFileToBucket = async (
    file: File,
    bucket: string
 ): Promise<string> => {
-   const fileExt = file.name.split(".").pop();
-   const fileName = `${Date.now()}.${fileExt}`;
-   const { error } = await supabase.storage.from(bucket).upload(fileName, file);
-   if (error) throw error;
-   const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
-   return data.publicUrl;
+   // Map bucket names to categories
+   const categoryMap: Record<string, "product" | "rider" | "general"> = {
+      "product-images": "product",
+      "rider-images": "rider",
+      "category-images": "general",
+   };
+   
+   const category = categoryMap[bucket] || "general";
+   return uploadFile(file, category);
 };
 
 interface SelectedImage {

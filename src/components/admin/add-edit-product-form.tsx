@@ -60,15 +60,18 @@ import type {
 } from "@/lib/api/products";
 import { VariantGeneratorDialog } from "@/components/admin/variant-generator-dialog";
 import { getProductErrorMessage } from "./admin-products-utils";
-import { supabase } from "@/integrations/supabase/client";
+import { uploadFile } from "@/lib/api/upload";
 
-// Helper function to upload files to Supabase storage bucket
+// Helper function to upload files to backend
 async function uploadFileToBucket(file: File, bucket: string): Promise<string> {
-  const filePath = `${Date.now()}-${file.name}`;
-  const { error } = await supabase.storage.from(bucket).upload(filePath, file);
-  if (error) throw error;
-  const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
-  return data.publicUrl;
+  // Map bucket names to categories
+  const categoryMap: Record<string, "product" | "rider" | "general"> = {
+    "product-images": "product",
+    "rider-images": "rider",
+  };
+  
+  const category = categoryMap[bucket] || "general";
+  return uploadFile(file, category);
 }
 
 const optionalNumber = z.preprocess(
